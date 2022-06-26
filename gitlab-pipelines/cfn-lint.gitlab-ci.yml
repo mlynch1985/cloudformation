@@ -1,0 +1,19 @@
+#  ### CFN-LINT ###
+#  Github URL: https://github.com/aws-cloudformation/cfn-lint
+#
+#  Validate AWS CloudFormation yaml/json templates against the AWS CloudFormation Resource
+#    Specification and additional checks. Includes checking valid values for resource
+#    properties and best practices.
+#
+stages:
+    - test
+
+run-cfn-lint:
+    image: public.ecr.aws/rolston/cfn-security:latest ## alpine/cfn-lint
+    stage: test
+    tags:
+        - amd64-always-pull-image
+    script:
+        - echo "Executing cfn-lint... "
+        - cfn-lint --format pretty
+        - echo "Execution Complete!"

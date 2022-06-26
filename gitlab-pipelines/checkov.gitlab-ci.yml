@@ -1,0 +1,24 @@
+#  ### Checkov ###
+#  Github URL: https://github.com/bridgecrewio/checkov
+#
+#  Checkov is a static code analysis tool for infrastructure as code (IaC) and also a software
+#    composition analysis (SCA) tool for images and open source packages.
+#    It scans cloud infrastructure provisioned using Terraform, Terraform plan, Cloudformation,
+#    AWS SAM, Kubernetes, Helm charts,Kustomize, Dockerfile, Serverless, Bicep, OpenAPI or ARM Templates
+#     and detects security and compliance misconfigurations using graph-based scanning.
+#
+stages:
+    - test
+
+run-checkov:
+    image: bridgecrew/checkov:latest
+    stage: test
+    tags:
+        - amd64-always-pull-image
+    script:
+        - echo "Installing latest version of checkov... "
+        - pip3 install -U checkov
+        - echo "Install Complete!"
+        - echo "Executing checkov... "
+        - checkov --directory $CI_PROJECT_DIR/ --skip-path $CI_PROJECT_DIR/.gitlab-ci.yml
+        - echo "Execution Complete!"

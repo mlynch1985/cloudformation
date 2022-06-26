@@ -1,0 +1,23 @@
+#  ### CFN-NAG ###
+#  Github URL: https://github.com/stelligent/cfn_nag
+#
+#  The cfn-nag tool looks for patterns in CloudFormation templates that may indicate insecure infrastructure.
+#  Roughly speaking, it will look for:
+#    IAM rules that are too permissive (wildcards)
+#    Security group rules that are too permissive (wildcards)
+#    Access logs that aren't enabled
+#    Encryption that isn't enabled
+#    Password literals
+#
+stages:
+    - test
+
+run-cfn-nag:
+    image: public.ecr.aws/rolston/cfn-security:latest ## alpine/cfn-nag
+    stage: test
+    tags:
+        - amd64-always-pull-image
+    script:
+        - echo "Executing cfn-nag... "
+        - cfn_nag_scan --input-path=$CI_PROJECT_DIR/
+        - echo "Execution Complete!"

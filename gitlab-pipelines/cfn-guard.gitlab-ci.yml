@@ -1,0 +1,25 @@
+#  ### CFN-Guard ###
+#  Github URL: https://github.com/aws-cloudformation/cloudformation-guard
+#
+#  AWS CloudFormation Guard is an open-source general-purpose policy-as-code evaluation tool.
+#    It provides developers with a simple-to-use, yet powerful and expressive domain-specific
+#    language (DSL) to define policies and enables developers to validate JSON- or YAML- formatted
+#    structured data with those policies.
+#
+stages:
+    - test
+
+run-cfn-guard:
+    stage: test
+    image: public.ecr.aws/docker/library/centos:latest
+    tags:
+        - amd64-always-pull-image
+    script:
+        - echo "Installing cfn-guard..."
+        - curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/aws-cloudformation/cloudformation-guard/main/install-guard.sh | sh
+        - PATH=~/.guard/bin/
+        - echo "Install Complete!"
+
+        - echo "Executing cfn-guard..."
+        # - cfn-guard validate -r guard-policies.guard  ## Uncomment once you have created and committed your cfn-guard policies
+        - echo "Execution Complete!"
