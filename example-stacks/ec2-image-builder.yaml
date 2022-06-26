@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This template will deploy a sample EC2 ImageBuilder pipeline and dedicated vpc that will generate an AmazonLinux2 AMI.
+
+Resources:
+  IamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-EC2ImageBuilder-Role'
+      Description: 'This role will grant EC2 ImageBuilder minimum neccessary permissions to allow pipelines to execute'
+      MaxSessionDuration: 3600 # in seconds
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder'
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: GrantS3Read
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:List*
+                  - s3:Get*
+                Resource: 'arn:aws:s3:::my-bucket/*'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-EC2ImageBuilder-Profile'
+      Path: /
+      Roles:
+        - !Ref IamRole
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/27'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: 'default'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-EC2ImageBuilder'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-EC2ImageBuilder'
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-EC2ImageBuilder-Public'
+
+  PublicSubnetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [!GetAtt VPC.CidrBlock, 2, 4]]
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-EC2ImageBuilder-Public'
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicSubnetRouteTable
+
+  Component:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: !Sub '${AWS::StackName}-HelloWorld-Component'
+      Platform: Linux
+      Version: 1.0.0
+      Description: 'This component will echo Hello World out to the console'
+      ChangeDescription: 'Initial Version'
+      # Uri: 's3://my-bucket/HelloWorld.yml' # Cannot use Uri and Data together, remove one first
+      Data: |
+        name: HelloWorld
+        description: This component will echo Hello World out to the console
+        schemaVersion: 1.0
+
+        phases:
+          - name: build
+            steps:
+              - name: step1
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo 'Hello World'
+
+  Recipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name: !Sub '${AWS::StackName}-HelloWorld-Recipe'
+      Description: 'This recipe will create an AMI based on AmazonLinux2 AMI and set the root drive to 50GB'
+      Version: 1.0.0
+      ParentImage: !Sub 'arn:aws:imagebuilder:${AWS::Region}:aws:image/amazon-linux-2-x86/x.x.x'
+      Components:
+        - ComponentArn: !Ref Component
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: True
+            VolumeSize: 50
+            VolumeType: gp3
+            Encrypted: True
+
+  Infrastructure:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: !Sub '${AWS::StackName}-HelloWorld-Infrastructure'
+      Description: 'This infrastructure configuration will launch into our custom ImageBuilder VPC'
+      InstanceProfileName: !Sub '${AWS::StackName}-EC2ImageBuilder-Profile'
+      SecurityGroupIds:
+        - !GetAtt VPC.DefaultSecurityGroup
+      SubnetId: !Ref PublicSubnet
+      TerminateInstanceOnFailure: True
+      # KeyPair: 'my-key-pair'
+      # SnsTopicArn: 'arn:aws:sns:us-east-1:123456789012:mystack-mytopic-NZJ5JSMVGFIE'
+      # InstanceTypes:
+      #   - t3.medium
+      #   - t3.large
+      # Logging:
+      #   S3Logs:
+      #     S3BucketName: 'my-bucket'
+      #     S3KeyPrefix: 'my-bucket-prefix'
+
+  Distribution:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: !Sub '${AWS::StackName}-HelloWorld-Distribution'
+      Description: 'This distribution configuration will deploy our AMI to the current region'
+      Distributions:
+        - Region: !Ref 'AWS::Region'
+          AmiDistributionConfiguration:
+            Name: !Sub '${AWS::StackName}-HelloWorld-{{ imagebuilder:buildDate }}' # the {{imagebuilder:buildDate}} variable is required in the output AMI name
+            AmiTags:
+              Name: !Sub '${AWS::StackName}-HelloWorld'
+            # LaunchPermissionConfiguration:
+            #   UserGroups:
+            #     - 'Group1'
+            #   UserIds:
+            #     - '123456789012'
+
+  Pipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name: !Sub '${AWS::StackName}-HelloWorld-Pipeline'
+      Description: 'Deploys a sample AmazonLinux2 Ami to current region'
+      Status: ENABLED
+      ImageRecipeArn: !Ref Recipe
+      InfrastructureConfigurationArn: !Ref Infrastructure
+      DistributionConfigurationArn: !Ref Distribution
+      ImageTestsConfiguration:
+        ImageTestsEnabled: false
+        TimeoutMinutes: 60
+      Schedule:
+        ScheduleExpression: 'cron(0 0 * * ? 0)'
+        PipelineExecutionStartCondition: 'EXPRESSION_MATCH_ONLY' # Allowed Values: EXPRESSION_MATCH_AND_DEPENDENCY_UPDATES_AVAILABLE | EXPRESSION_MATCH_ONLY
+
+## Uncomment this block if you want an initial AMI to be created during Stack Creation
+## Warning:  This can take between 30-90 minutes for the stack to finish completion
+# ## EC2 ImageBuilder Image
+# IBImage:
+#   Type: AWS::ImageBuilder::Image
+#   Properties:
+#     ImageRecipeArn: !Ref Recipe
+#     InfrastructureConfigurationArn: !Ref Infrastructure
+#     DistributionConfigurationArn: !Ref Distribution
+#     ImageTestsConfiguration:
+#       ImageTestsEnabled: false
+#       TimeoutMinutes: 60

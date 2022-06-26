@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This template will deploy a sample Linux HTTPD site hosted in an AutoScaling Group.
+
+Parameters:
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+  IamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-LinuxASG-Role'
+      Description: 'This role will grant EC2 access to communicate with Systems Manager'
+      MaxSessionDuration: 3600 # in seconds
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-LinuxASG-Profile'
+      Path: /
+      Roles:
+        - !Ref IamRole
+
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-LinuxASG-ELBSecurityGroup'
+      GroupDescription: 'This group will allow HTTP access to the Elastic Load Balancer from the world'
+      VpcId: !ImportValue VPCID
+      SecurityGroupIngress:
+        - Description: 'Grants HTTP access from the world'
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-LinuxASG-ELBSecurityGroup'
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-LinuxASG-EC2SecurityGroup'
+      GroupDescription: 'This group will allow HTTP access to the EC2 Instances from the Load Balancer'
+      VpcId: !ImportValue VPCID
+      SecurityGroupIngress:
+        - Description: 'Grants HTTP access from the load balancer'
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ELBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-LinuxASG-EC2SecurityGroup'
+
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${AWS::StackName}-LinuxASG'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets:
+        - !ImportValue PublicSubnetA
+        - !ImportValue PublicSubnetB
+        - !ImportValue PublicSubnetC
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-LinuxASG'
+      VpcId: !ImportValue VPCID
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckIntervalSeconds: 30 # seconds
+      HealthCheckPath: /
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5 # seconds
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+
+  ELBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ElasticLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-LinuxASG-LaunchTemplate'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name: !Ref InstanceProfile
+        ImageId: !Ref LatestAmiId
+        InstanceType: t3.micro
+        SecurityGroupIds:
+          - !Ref EC2SecurityGroup
+        UserData: !Base64 |
+          #!/bin/bash
+          yum update -y
+          yum install httpd -y
+          service httpd start
+          chkconfig httpd on
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${AWS::StackName}-LinuxASG-AutoScalingGroup'
+      AvailabilityZones:
+        - !Select [0, !GetAZs '']
+        - !Select [1, !GetAZs '']
+        - !Select [2, !GetAZs '']
+      DesiredCapacity: 3
+      HealthCheckGracePeriod: 180
+      HealthCheckType: ELB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MaxSize: 3
+      MinSize: 3
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      VPCZoneIdentifier:
+        - !ImportValue PrivateSubnetA
+        - !ImportValue PrivateSubnetB
+        - !ImportValue PrivateSubnetC
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-LinuxASG-AutoScalingGroup'
+          PropagateAtLaunch: true
+
+Outputs:
+  LinuxSiteUrl:
+    Value: !GetAtt ElasticLoadBalancer.DNSName
+    Description: Public facing url of our sample website
+    Export:
+      Name: LinuxSiteUrl

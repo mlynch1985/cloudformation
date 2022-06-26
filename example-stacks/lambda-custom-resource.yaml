@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Uses a Cloudformation custom resource Lambda function to deploy unsupported resources while maintaining the full management lifecycle
+
+Parameters:
+  SecurityGroupName:
+    Type: String
+    Description: Specify a name for the security group
+
+  VpcId:
+    Type: String
+    Description: Specify the VPC ID for the security group
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Grants Lambda access to Cloudwatch Logs and to create unsupported resources
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+
+  SecurityGroup:
+    Type: Custom::SecurityGroup
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Creates Security Group
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 300
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import cfnresponse
+
+          client = boto3.client('ec2')
+
+          def lambda_handler(event, context):
+            if event['RequestType'] == 'Create':
+              try:
+                print('Received create event')
+                print(str(event))
+
+                response = client.create_security_group(
+                  Description='Test Security Group',
+                  GroupName='${SecurityGroupName}',
+                  VpcId='${VpcId}',
+                  TagSpecifications=[
+                    {
+                      'ResourceType': 'security-group',
+                      'Tags': [
+                        {
+                          'Key': 'Name',
+                          'Value': '${SecurityGroupName}'
+                        }
+                      ]
+                    }
+                  ]
+                )
+
+                print(response)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+              except Exception as inst:
+                print(inst)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+            elif event['RequestType'] == 'Delete':
+              try:
+                print('Received delete event')
+                print(str(event))
+
+                groupIDs = client.describe_security_groups(
+                  Filters=[
+                    {
+                      'Name': 'tag:Name',
+                      'Values': ['${SecurityGroupName}']
+                    }
+                  ]
+                )
+
+                print(groupIDs)
+                groupID = groupIDs['SecurityGroups'][0]['GroupId']
+                print(groupID)
+
+                response = client.delete_security_group(
+                  GroupId=groupID
+                )
+
+                print(response)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+              except Exception as inst:
+                print(inst)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})

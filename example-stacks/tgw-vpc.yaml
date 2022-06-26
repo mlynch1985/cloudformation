@@ -1,0 +1,1040 @@
+# This template currently assumes deployment into the us-east-1 region. Update AMI IDs to target a different region.
+#
+# Please subscribe to the Firewall Product on the AWS Marketplace and obtain latest AMI ID before deploying.
+#
+# Enable Appliance Mode on the DMZ Transit Gateway Attachment
+# https://docs.aws.amazon.com/vpc/latest/tgw/transit-gateway-appliance-scenario.html#transit-gateway-appliance-support
+#
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This template will deploy three VPCs linked together with a Transit Gateway. It will use a DMZ VPC and Fortinet Fortigate NGFW appliance to route all internet based traffic.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'Firewall Appliance Configuration'
+        Parameters:
+          - FirewallAmiId
+          - FirewallInstanceSize
+      - Label:
+          default: 'Test Server Configuration'
+        Parameters:
+          - DevServerAmi
+          - DevServerSize
+          - PrdServerAmi
+          - PrdServerSize
+      - Label:
+          default: 'Environment Configuration'
+        Parameters:
+          - PublicCidr
+    ParameterLabels:
+      FirewallAmiId:
+        default: 'Firewall Appliance AMI ID (Default: Fortinet Fortigate Next-Generation Firewall)'
+      FirewallInstanceSize:
+        default: 'Firewall Appliance Instance Type'
+      DevServerAmi:
+        default: 'DEV Server AMI ID (Default: Amazon Linux 2 HVM x86_64bit)'
+      DevServerSize:
+        default: 'DEV Server Instance Type'
+      PrdServerAmi:
+        default: 'PRD Server AMI ID (Default: Microsoft Windows Server 2019 Base DataCenter Edition)'
+      PrdServerSize:
+        default: 'PRD Server Instance Type'
+      PublicCidr:
+        default: 'Public Access CIDR'
+
+Parameters:
+  FirewallAmiId:
+    Type: AWS::EC2::Image::Id
+    Default: 'ami-01a54d044634cf0f6' # Fortinet FortiGate Next-Generation Firewall
+  FirewallInstanceSize:
+    Type: String
+    Default: 'c5.xlarge'
+  DevServerAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  DevServerSize:
+    Type: String
+    Default: 't3.medium'
+  PrdServerAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base
+  PrdServerSize:
+    Type: String
+    Default: 'c5.xlarge'
+  PublicCidr:
+    Type: String
+    Default: '0.0.0.0/0'
+
+Resources:
+  ### Start create DMZ VPC and Subnets ###
+  DmzVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/20'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-VPC'
+
+  DmzSubnetPublicA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.0.0/22'
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Public-A'
+
+  DmzSubnetPublicB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.4.0/22'
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Public-B'
+
+  DmzSubnetTransitA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.8.0/24'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Transit-A'
+
+  DmzSubnetTransitB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.9.0/24'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Transit-B'
+
+  DmzSubnetMgmtA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.10.0/24'
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Mgmt-A'
+
+  DmzSubnetMgmtB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.11.0/24'
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Mgmt-B'
+
+  DmzSubnetHeartA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.12.0/24'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Heartbeat-A'
+
+  DmzSubnetHeartB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.13.0/24'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Heartbeat-B'
+  ### End create DMZ VPC and Subnets ###
+
+  ### Start create DEV VPC and Subnets ###
+  DevVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.16.0/21'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV-VPC'
+
+  DevSubnetPrivateA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.16.0/22'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref DevVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV-Private-A'
+
+  DevSubnetPrivateB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.20.0/22'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref DevVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV-Private-B'
+  ### End create DEV VPC and Subnets ###
+
+  ### Start create PRD VPC and Subnets ###
+  PrdVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.24.0/21'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD-VPC'
+
+  PrdSubnetPrivateA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: '10.0.24.0/22'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref PrdVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD-Private-A'
+
+  PrdSubnetPrivateB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: '10.0.28.0/22'
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref PrdVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD-Private-B'
+  ### End create PRD VPC and Subnets ###
+
+  ### Start create DMZ Internet Gateway ###
+  DmzIgw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-IGW'
+
+  DmzVpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DmzVpc
+      InternetGatewayId: !Ref DmzIgw
+  ### End create DMZ Internet Gateway ###
+
+  ### Start create Security Groups ###
+  DmzSgPublic:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic to public facing interface of DMZ Firewall
+      VpcId: !Ref DmzVpc
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: !Ref PublicCidr
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Public'
+
+  DmzSgPrivate:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic on private networks.
+      VpcId: !Ref DmzVpc
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: '10.0.0.0/8'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Private'
+
+  DmzSgPrivateSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref DmzSgPrivate
+      GroupId: !Ref DmzSgPrivate
+
+  DmzSgHeart:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic on heartbeat networks
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Heartbeat'
+
+  DmzSgHearSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref DmzSgHeart
+      GroupId: !Ref DmzSgHeart
+
+  DevSgPrivate:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from DMZ Subnets
+      VpcId: !Ref DevVpc
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: '10.0.0.0/8'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV-Private'
+
+  DevSgPrivateSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref DevSgPrivate
+      GroupId: !Ref DevSgPrivate
+
+  PrdSgPrivate:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from DMZ Subnets
+      VpcId: !Ref PrdVpc
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: '10.0.0.0/8'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD-Private'
+
+  PrdSgPrivateSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: '-1'
+      SourceSecurityGroupId: !Ref PrdSgPrivate
+      GroupId: !Ref PrdSgPrivate
+  ### End create  Security Groups ###
+
+  ### Start create Transit Gateway and VPC Attachments ###
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      AutoAcceptSharedAttachments: 'enable'
+      DefaultRouteTableAssociation: 'disable'
+      DefaultRouteTablePropagation: 'disable'
+      Description: 'Primary TransitGateway used to route all traffice between VPCs and the Internet'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-TGW'
+
+  DmzTgwAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref DmzVpc
+      SubnetIds:
+        - !Ref DmzSubnetTransitA
+        - !Ref DmzSubnetTransitB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ'
+
+  DevTgwAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref DevVpc
+      SubnetIds:
+        - !Ref DevSubnetPrivateA
+        - !Ref DevSubnetPrivateB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV'
+
+  PrdTgwAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      VpcId: !Ref PrdVpc
+      SubnetIds:
+        - !Ref PrdSubnetPrivateA
+        - !Ref PrdSubnetPrivateB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD'
+  ### End create Transit Gateway and VPC Attachments ###
+
+  ### Start create DMZ Route Tables and Associations ###
+  DmzRtPublic:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Public'
+
+  DmzRtTransit:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Transit'
+
+  DmzRtMgmt:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Management'
+
+  DmzRtHeart:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DmzVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Heartbeat'
+
+  DmzRtAssociationPublicA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetPublicA
+      RouteTableId: !Ref DmzRtPublic
+
+  DmzRtAssociationPublicB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetPublicB
+      RouteTableId: !Ref DmzRtPublic
+
+  DmzRtAssociationPrivateA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetTransitA
+      RouteTableId: !Ref DmzRtTransit
+
+  DmzRtAssociationPrivateB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetTransitB
+      RouteTableId: !Ref DmzRtTransit
+
+  DmzRtAssociationMgmtA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetMgmtA
+      RouteTableId: !Ref DmzRtMgmt
+
+  DmzRtAssociationMgmtB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetMgmtB
+      RouteTableId: !Ref DmzRtMgmt
+
+  DmzRtAssociationHeartA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetHeartA
+      RouteTableId: !Ref DmzRtHeart
+
+  DmzRtAssociationHeartB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DmzSubnetHeartB
+      RouteTableId: !Ref DmzRtHeart
+  ### End create DMZ Route Tables and Associations ###
+
+  ### Start create DEV Route Tables and Associations ###
+  DevRtPrivate:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DevVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV-Private'
+
+  DevRtAssociationPrivateA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevSubnetPrivateA
+      RouteTableId: !Ref DevRtPrivate
+
+  DevRtAssociationPrivateB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevSubnetPrivateB
+      RouteTableId: !Ref DevRtPrivate
+  ### End create DEV Route Tables and Associations ###
+
+  ### Start create PRD Route Tables and Associations ###
+  PrdRtPrivate:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PrdVpc
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD-Private'
+
+  PrdRtAssociationPrivateA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrdSubnetPrivateA
+      RouteTableId: !Ref PrdRtPrivate
+
+  PrdRtAssociationPrivateB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrdSubnetPrivateB
+      RouteTableId: !Ref PrdRtPrivate
+  ### End create PRD Route Tables and Associations ###
+
+  ### Start create Transit Gateway Route Tables and Associations ###
+  DmzTgwRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ'
+
+  DevTgwRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV'
+
+  PrdTgwRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD'
+
+  DmzTgwRtAssociation:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayRouteTableId: !Ref DmzTgwRouteTable
+      TransitGatewayAttachmentId: !Ref DmzTgwAttachment
+
+  DevTgwRtAssociation:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayRouteTableId: !Ref DevTgwRouteTable
+      TransitGatewayAttachmentId: !Ref DevTgwAttachment
+
+  PrdTgwRtAssociation:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayRouteTableId: !Ref PrdTgwRouteTable
+      TransitGatewayAttachmentId: !Ref PrdTgwAttachment
+  ### End create Transit Gateway Route Tables and Associations ###
+
+  ### Start create DMZ routes ###
+  DmzRoutePublicIgw:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DmzRtPublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref DmzIgw
+
+  DmzRoutePublicTgw:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DmzRtPublic
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn:
+      - DmzTgwAttachment
+      - DevTgwAttachment
+      - PrdTgwAttachment
+
+  DmzRouteTransitFW:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DmzRtTransit
+      DestinationCidrBlock: 0.0.0.0/0
+      NetworkInterfaceId: !Ref DmzTransitInterfaceA
+
+  DmzRouteTransitTgw:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DmzRtTransit
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn:
+      - DmzTgwAttachment
+      - DevTgwAttachment
+      - PrdTgwAttachment
+
+  DmzRouteMgmtIgw:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DmzRtMgmt
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref DmzIgw
+
+  DmzRouteMgmtTgw:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DmzRtMgmt
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn:
+      - DmzTgwAttachment
+      - DevTgwAttachment
+      - PrdTgwAttachment
+  ### End create DMZ routes ###
+
+  ### Start create DEV and PRD routes ###
+  DevRoutePrivateTgw:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DevRtPrivate
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn:
+      - DmzTgwAttachment
+      - DevTgwAttachment
+      - PrdTgwAttachment
+
+  PrdRoutePrivateTgw:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrdRtPrivate
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref TransitGateway
+    DependsOn:
+      - DmzTgwAttachment
+      - DevTgwAttachment
+      - PrdTgwAttachment
+  ### End create DEV and PRD routes ###
+
+  ## Start create TGW routes ###
+  DmzTgwRouteDev:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !GetAtt DevVpc.CidrBlock
+      TransitGatewayAttachmentId: !Ref DevTgwAttachment
+      TransitGatewayRouteTableId: !Ref DmzTgwRouteTable
+
+  DmzTgwRoutePrd:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !GetAtt PrdVpc.CidrBlock
+      TransitGatewayAttachmentId: !Ref PrdTgwAttachment
+      TransitGatewayRouteTableId: !Ref DmzTgwRouteTable
+
+  DevTgwRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      TransitGatewayAttachmentId: !Ref DmzTgwAttachment
+      TransitGatewayRouteTableId: !Ref DevTgwRouteTable
+
+  PrdTgwRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: '0.0.0.0/0'
+      TransitGatewayAttachmentId: !Ref DmzTgwAttachment
+      TransitGatewayRouteTableId: !Ref PrdTgwRouteTable
+  ## End create TGW routes ###
+
+  ### Start create DMZ Firewall Appliances ###
+  FirewallIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-Firewall-Role'
+      Description: 'This role will grant EC2 access to communicate with Systems Manager and allow for a shared EIP to switch between firewall appliances'
+      MaxSessionDuration: 3600 # in seconds
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: GrantEIPFailover
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:Describe*'
+                  - 'ec2:AssociateAddress'
+                  - 'ec2:AssignPrivateIpAddresses'
+                  - 'ec2:UnassignPrivateIpAddresses'
+                  - 'ec2:ReplaceRoute'
+                Resource: '*'
+
+  FirewallInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-Firewall-Profile'
+      Path: /
+      Roles:
+        - !Ref FirewallIamRole
+
+  DmzPublicInterfaceA:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Public'
+      GroupSet:
+        - !Ref DmzSgPublic
+        - !Ref DmzSgPrivate
+      PrivateIpAddress: '10.0.0.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetPublicA
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWPublic-A'
+
+  DmzPublicInterfaceB:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Public'
+      GroupSet:
+        - !Ref DmzSgPublic
+        - !Ref DmzSgPrivate
+      PrivateIpAddress: '10.0.4.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetPublicB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWPublic-B'
+
+  DmzTransitInterfaceA:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Transit'
+      GroupSet:
+        - !Ref DmzSgPrivate
+      PrivateIpAddress: '10.0.8.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetTransitA
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWTransit-A'
+
+  DmzTransitInterfaceB:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Transit'
+      GroupSet:
+        - !Ref DmzSgPrivate
+      PrivateIpAddress: '10.0.9.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetTransitB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWTransit-B'
+
+  DmzMgmtInterfaceA:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Management'
+      GroupSet:
+        - !Ref DmzSgPublic
+        - !Ref DmzSgPrivate
+      PrivateIpAddress: '10.0.10.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetMgmtA
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWMgmt-A'
+
+  DmzMgmtInterfaceB:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Management'
+      GroupSet:
+        - !Ref DmzSgPublic
+        - !Ref DmzSgPrivate
+      PrivateIpAddress: '10.0.11.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetMgmtB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWMgmt-B'
+
+  DmzHeartInterfaceA:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Heartbeat'
+      GroupSet:
+        - !Ref DmzSgHeart
+      PrivateIpAddress: '10.0.12.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetHeartA
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWHeartbeat-A'
+
+  DmzHeartInterfaceB:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: 'Heartbeat'
+      GroupSet:
+        - !Ref DmzSgHeart
+      PrivateIpAddress: '10.0.13.5'
+      SourceDestCheck: false
+      SubnetId: !Ref DmzSubnetHeartB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-FWHeartbeat-B'
+
+  DmzPublicEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: 'vpc'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Public'
+
+  DmzMgmtEipA:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: 'vpc'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Management-A'
+
+  DmzMgmtEipB:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: 'vpc'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Management-B'
+
+  DmzPublicEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt DmzPublicEip.AllocationId
+      NetworkInterfaceId: !Ref DmzPublicInterfaceA
+
+  DmzMgmtEipAssociationA:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt DmzMgmtEipA.AllocationId
+      NetworkInterfaceId: !Ref DmzMgmtInterfaceA
+
+  DmzMgmtEipAssociationB:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt DmzMgmtEipB.AllocationId
+      NetworkInterfaceId: !Ref DmzMgmtInterfaceB
+
+  DmzFwInstanceA:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      ImageId: !Ref FirewallAmiId
+      InstanceType: !Ref FirewallInstanceSize
+      IamInstanceProfile: !Ref FirewallInstanceProfile
+      SourceDestCheck: false
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref DmzPublicInterfaceA
+          DeviceIndex: 0
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Firewall-A'
+
+  DmzFwInstanceB:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      ImageId: !Ref FirewallAmiId
+      InstanceType: !Ref FirewallInstanceSize
+      IamInstanceProfile: !Ref FirewallInstanceProfile
+      SourceDestCheck: false
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref DmzPublicInterfaceB
+          DeviceIndex: 0
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DMZ-Firewall-B'
+
+  DmzTransitInterfaceAttachmentA:
+    Type: AWS::EC2::NetworkInterfaceAttachment
+    Properties:
+      DeleteOnTermination: true
+      DeviceIndex: 1
+      InstanceId: !Ref DmzFwInstanceA
+      NetworkInterfaceId: !Ref DmzTransitInterfaceA
+
+  DmzTransitInterfaceAttachmentB:
+    Type: AWS::EC2::NetworkInterfaceAttachment
+    Properties:
+      DeleteOnTermination: true
+      DeviceIndex: 1
+      InstanceId: !Ref DmzFwInstanceB
+      NetworkInterfaceId: !Ref DmzTransitInterfaceB
+
+  DmzMgmtInterfaceAttachmentA:
+    Type: AWS::EC2::NetworkInterfaceAttachment
+    Properties:
+      DeleteOnTermination: true
+      DeviceIndex: 2
+      InstanceId: !Ref DmzFwInstanceA
+      NetworkInterfaceId: !Ref DmzMgmtInterfaceA
+
+  DmzMgmtInterfaceAttachmentB:
+    Type: AWS::EC2::NetworkInterfaceAttachment
+    Properties:
+      DeleteOnTermination: true
+      DeviceIndex: 2
+      InstanceId: !Ref DmzFwInstanceB
+      NetworkInterfaceId: !Ref DmzMgmtInterfaceB
+
+  DmzHeartInterfaceAttachmentA:
+    Type: AWS::EC2::NetworkInterfaceAttachment
+    Properties:
+      DeleteOnTermination: true
+      DeviceIndex: 3
+      InstanceId: !Ref DmzFwInstanceA
+      NetworkInterfaceId: !Ref DmzHeartInterfaceA
+
+  DmzHeartInterfaceAttachmentB:
+    Type: AWS::EC2::NetworkInterfaceAttachment
+    Properties:
+      DeleteOnTermination: true
+      DeviceIndex: 3
+      InstanceId: !Ref DmzFwInstanceB
+      NetworkInterfaceId: !Ref DmzHeartInterfaceB
+  ### End create DMZ Firewall Appliances ###
+
+  ### Start create Dev/Prd Test Instances ###
+  TestServerIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-TestServer-Role'
+      Description: 'This role will grant EC2 access to communicate with Systems Manager'
+      MaxSessionDuration: 3600 # in seconds
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+
+  TestServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-TestServer-Profile'
+      Path: /
+      Roles:
+        - !Ref TestServerIamRole
+
+  DevInstanceA:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      IamInstanceProfile: !Ref TestServerInstanceProfile
+      ImageId: !Ref DevServerAmi
+      InstanceType: !Ref DevServerSize
+      SecurityGroupIds:
+        - !Ref DevSgPrivate
+      SubnetId: !Ref DevSubnetPrivateA
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV-Instance-A'
+
+  DevInstanceB:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      IamInstanceProfile: !Ref TestServerInstanceProfile
+      ImageId: !Ref DevServerAmi
+      InstanceType: !Ref DevServerSize
+      SecurityGroupIds:
+        - !Ref DevSgPrivate
+      SubnetId: !Ref DevSubnetPrivateB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-DEV-Instance-B'
+
+  PrdInstanceA:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      IamInstanceProfile: !Ref TestServerInstanceProfile
+      ImageId: !Ref PrdServerAmi
+      InstanceType: !Ref PrdServerSize
+      SecurityGroupIds:
+        - !Ref PrdSgPrivate
+      SubnetId: !Ref PrdSubnetPrivateA
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD-Instance-A'
+      UserData: !Base64 |
+        <powershell>
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+        </powershell>
+
+  PrdInstanceB:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs '']
+      IamInstanceProfile: !Ref TestServerInstanceProfile
+      ImageId: !Ref PrdServerAmi
+      InstanceType: !Ref PrdServerSize
+      SecurityGroupIds:
+        - !Ref PrdSgPrivate
+      SubnetId: !Ref PrdSubnetPrivateB
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-PRD-Instance-B'
+      UserData: !Base64 |
+        <powershell>
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+        </powershell>
+
+### End create Dev/Prd Test Instances ###

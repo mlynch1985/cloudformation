@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Deploys EC2 Dedicated Hosts with custom options and allows for the instance family to be specified.
+
+Parameters:
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Specify the availability zone to deploy dedicated host into.
+  InstanceFamily:
+    Type: String
+    Description: 'Provide a valid dedicated host instance family. Reference: https://aws.amazon.com/ec2/dedicated-hosts/pricing/#host-configuration'
+  InstanceCount:
+    Type: Number
+    Description: Specify how many dedicated hosts you want to launch.
+    MinValue: 1
+    MaxValue: 10
+    Default: 1
+  AutoPlacement:
+    Type: String
+    Description: Set to on to allow instances to be launched without a specific host id.
+    AllowedValues: ['on', 'off']
+    Default: 'off'
+  HostRecovery:
+    Type: String
+    Description: Set to on to enable automatic host recovery.
+    AllowedValues: ['on', 'off']
+    Default: 'off'
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Grants Lambda access to Cloudwatch Logs and to launch dedicated hosts.
+      RoleName: !Sub '${AWS::StackName}-Lambda-Execution-Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GrantEC2LaunchDedicatedHosts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeHosts
+                  - ec2:AllocateHosts
+                  - ec2:ReleaseHosts
+                  - ec2:CreateTags
+                Resource: '*'
+
+  DedicatedHost:
+    Type: Custom::LambdaFunction
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: !Sub Deploys EC2 dedicated hosts as part of the ${AWS::StackName} Cloudformation stack.
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 300
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import cfnresponse
+
+          client = boto3.client('ec2')
+
+          def lambda_handler(event, context):
+            if event['RequestType'] == 'Create':
+              try:
+                print('Received create event')
+                print(str(event))
+
+                # allocates dedicated hosts based upon provided parameters
+                response = client.allocate_hosts(
+                  AutoPlacement='${AutoPlacement}',
+                  AvailabilityZone='${AvailabilityZone}',
+                  InstanceFamily='${InstanceFamily}',
+                  Quantity=${InstanceCount},
+                  HostRecovery='${HostRecovery}',
+                  TagSpecifications=[
+                    {
+                      'ResourceType': 'dedicated-host',
+                      'Tags': [
+                        {
+                          'Key': 'Name',
+                          'Value': '${AWS::StackName}'
+                        },
+                        {
+                          'Key': '${AWS::StackName}', # mandatory key required when releasing dedicated host in below code
+                          'Value': '${AWS::StackName}'
+                        }
+                      ]
+                    }
+                  ]
+                )
+
+                print(response)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {}) # notify Cloudformation service that creation is complete
+
+              except Exception as inst:
+                print(inst)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {}) # notify Cloudformation service that creation has failed
+
+            elif event['RequestType'] == 'Delete':
+              try:
+                print('Received delete event')
+                print(str(event))
+
+                hostIDs = []
+
+                hostDict = client.describe_hosts(
+                  Filters=[
+                    {
+                      'Name': 'state',
+                      'Values': ['available']
+                    },
+                    {
+                      'Name': 'tag-key',
+                      'Values': ['${AWS::StackName}']
+                    }
+                  ]
+                )
+
+                for host in hostDict['Hosts']:
+                  hostIDs.append(host['HostId'])
+                  response = client.release_hosts(HostIds=hostIDs)
+
+                  print(response)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+              except Exception as inst:
+                print(inst)
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})

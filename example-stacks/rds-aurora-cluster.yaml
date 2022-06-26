@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This template will deploy a sample RDS Auora Serverless instance with Multi-AZ enabled.
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-RDS-SecurityGroup'
+      GroupDescription: 'This group will allow TCP:3306 inbound to our RDS Instances'
+      VpcId: !ImportValue VPCID
+      SecurityGroupIngress:
+        - Description: 'Grants TCP:3306 inbound access to our RDS Instance'
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !ImportValue VPCCidr
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ECS-ContainerSecurityGroup'
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub '${AWS::StackName}-rds-subnetgroup'
+      DBSubnetGroupDescription: 'RDS Subnet Group for Sample Database'
+      SubnetIds:
+        - !ImportValue PrivateSubnetA
+        - !ImportValue PrivateSubnetB
+        - !ImportValue PrivateSubnetC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-subnetgroup'
+
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-RDS-SampleCredentials'
+      Description: 'Sample RDS Instance Credentials'
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "sampleuser"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 24
+        ExcludeCharacters: '"@/\'
+
+  RDSCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      AvailabilityZones:
+        - !Select [0, !GetAZs '']
+        - !Select [1, !GetAZs '']
+        - !Select [2, !GetAZs '']
+      BackupRetentionPeriod: 1 # days
+      DatabaseName: 'RDSSampleDatabase'
+      DBClusterIdentifier: !Sub '${AWS::StackName}-Sample-Cluster'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref SecurityGroup
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}']]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}']]
+      Engine: aurora
+      EngineVersion: 5.6.10a
+      EngineMode: serverless
+      ScalingConfiguration:
+        AutoPause: true
+        MinCapacity: 2
+        MaxCapacity: 32
+        SecondsUntilAutoPause: 3600
+
+  RDSSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref RDSSecret
+      TargetId: !Ref RDSCluster
+      TargetType: AWS::RDS::DBCluster
+
+Outputs:
+  RDSEndpointAddress:
+    Value: !GetAtt RDSCluster.Endpoint.Address
+    Description: RDS Cluster Write Endpoint Address
+    Export:
+      Name: RDSEndpointAddress

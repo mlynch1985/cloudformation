@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This template will deploy a sample ECS Cluster hosting a PHP site across two availability zones.
+
+Resources:
+  IamExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-ECS-Execution-Role'
+      Description: 'This role will grant ECS permission to execute API calls'
+      MaxSessionDuration: 3600 # in seconds
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: ECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-ECS-ELBSecurityGroup'
+      GroupDescription: 'This group will allow HTTP access to the ECS LoadBalancer'
+      VpcId: !ImportValue VPCID
+      SecurityGroupIngress:
+        - Description: 'Grants HTTP access from the world'
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - Description: 'Grants full outbound access'
+          IpProtocol: tcp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ECS-ELBSecurityGroup'
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-ECS-ContainerSecurityGroup'
+      GroupDescription: 'This group will allow HTTP access to the ECS Instances from the Load Balancer'
+      VpcId: !ImportValue VPCID
+      SecurityGroupIngress:
+        - Description: 'Grants HTTP access from the load balancer'
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ELBSecurityGroup
+      SecurityGroupEgress:
+        - Description: 'Grants full outbound access'
+          IpProtocol: tcp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ECS-ContainerSecurityGroup'
+
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${AWS::StackName}-ECS-LoadBalancer'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets:
+        - !ImportValue PublicSubnetA
+        - !ImportValue PublicSubnetB
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-ECS-TargetGroup'
+      VpcId: !ImportValue VPCID
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      HealthCheckIntervalSeconds: 30 # seconds
+      HealthCheckPath: /
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5 # seconds
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+
+  ELBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ElasticLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  CloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '${AWS::StackName}-ECS-LogGroup'
+      RetentionInDays: 1
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-Sample-Cluster'
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  ECSTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt IamExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: !Sub '${AWS::StackName}-ECS-Container'
+          Image: amazon/amazon-ecs-sample
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref CloudWatchLogGroup
+              awslogs-stream-prefix: 'ecs-sample'
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ElasticLoadBalancer
+      - ELBListener
+    Properties:
+      TaskDefinition: !Ref ECSTask
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: 2
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !ImportValue PrivateSubnetA
+            - !ImportValue PrivateSubnetB
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+      LoadBalancers:
+        - ContainerName: !Sub '${AWS::StackName}-ECS-Container'
+          ContainerPort: 80
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  DemoSiteUrl:
+    Value: !GetAtt ElasticLoadBalancer.DNSName
+    Description: Public facing url of our sample website
+    Export:
+      Name: DemoSiteUrl

@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This template will deploy a sample Microsoft Active Directory environment and launch a Windows Server 2019 EC2 instance joined to the domain.  Additionally, we will install the latest CloudWatch Server Agent.
+
+Parameters:
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base
+
+Resources:
+  IamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-MSAD-Role'
+      Description: 'This role will grant EC2 access to communiate with Systems Manager and CloudWatch'
+      MaxSessionDuration: 3600 # in seconds
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+        - 'arn:aws:iam::aws:policy/AmazonSSMDirectoryServiceAccess'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}-MSAD-Profile'
+      Path: /
+      Roles:
+        - !Ref IamRole
+
+  MSADSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-MSAD-RootCredentials'
+      Description: 'Sample Active Directory Root Credentials'
+      GenerateSecretString:
+        PasswordLength: 24
+        ExcludeCharacters: '"@/\'
+
+  MicrosoftAD:
+    Type: AWS::DirectoryService::MicrosoftAD
+    Properties:
+      Edition: Enterprise
+      EnableSso: false
+      Name: corp.example.com
+      Password: !Join ['', ['{{resolve:secretsmanager:', !Ref MSADSecret, ':SecretString}}']]
+      ShortName: CORP
+      VpcSettings:
+        VpcId: !ImportValue VPCID
+        SubnetIds:
+          - !ImportValue PrivateSubnetA
+          - !ImportValue PrivateSubnetB
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref LatestAmiId
+      InstanceType: m3.large
+      SecurityGroupIds:
+        - !ImportValue DefaultSecurityGroup
+      SubnetId: !ImportValue PublicSubnetA
+      SsmAssociations:
+        - DocumentName: AWS-JoinDirectoryServiceDomain
+          AssociationParameters:
+            - Key: directoryId
+              Value:
+                - !Ref MicrosoftAD
+            - Key: directoryName
+              Value:
+                - 'corp.example.com'
+            - Key: dnsIpAddresses
+              Value:
+                - !Select [0, !GetAtt MicrosoftAD.DnsIpAddresses]
+                - !Select [1, !GetAtt MicrosoftAD.DnsIpAddresses]
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-MSAD-Instance'
+
+Outputs:
+  MSADId:
+    Value: !Ref MicrosoftAD
+    Description: The Logical ID of the Microsoft Active Directory Resource
+    Export:
+      Name: MSADId
+
+  DNSServers:
+    Value: !Join [', ', !GetAtt MicrosoftAD.DnsIpAddresses]
+    Description: The associated DNS Server IP addresses for our Microsoft Active Directory Resource
+    Export:
+      Name: DNSServers
+
+  MSADSecret:
+    Value: !Ref MSADSecret
+    Description: Location of our MS Active Directory Root Password
+    Export:
+      Name: MSADSecret
+
+  MSADInstanceDNS:
+    Value: !GetAtt Instance.PublicDnsName
+    Description: The public DNS of our Instance
+    Export:
+      Name: MSADInstanceDNS
