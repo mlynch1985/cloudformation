@@ -1,0 +1,30 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Get AWS Credentials') {
+            steps {
+                script {
+                    env.AWS_CREDENTIAL_NAME = "aws_account_${env.GIT_BRANCH.split('/')[-1]}"
+                }
+
+                withCredentials([usernamePassword(credentialsId: "${env.AWS_CREDENTIAL_NAME}", usernameVariable: 'AWS_ACCOUNT_ID', passwordVariable: 'AWS_IAM_ROLE')]) {
+                    script {
+                        env.AWS_ACCOUNT_ID = AWS_ACCOUNT_ID
+                        env.AWS_IAM_ROLE = AWS_IAM_ROLE
+                    }
+                }
+            }
+        }
+        stage('Delete CloudFormation Stack') {
+            steps {
+                withAWS(region: 'us-east-1', roleAccount: env.AWS_ACCOUNT_ID, role: env.AWS_IAM_ROLE, duration: 3600) {
+                    cfnDelete(
+                        stack: env.CFN_STACK_NAME,
+                        timeoutInMinutes: 60
+                    )
+                }
+            }
+        }
+    }
+}

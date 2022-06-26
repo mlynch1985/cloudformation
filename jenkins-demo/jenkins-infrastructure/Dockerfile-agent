@@ -1,0 +1,28 @@
+# Use Jenkins agent image as source
+FROM jenkins/inbound-agent
+
+# Run our commands as root user to make system changes
+USER root
+
+# Install the latest updates and some of our base tools
+RUN apt-get update && apt-get install -y git unzip jq curl wget build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libsqlite3-dev libreadline-dev libffi-dev libbz2-dev
+
+# Install Python3.10
+RUN wget https://www.python.org/ftp/python/3.10.1/Python-3.10.1.tgz
+RUN tar -xzf Python-3.10.1.tgz
+RUN cd Python-3.10.1
+RUN ./configure --enable-optimizations
+RUN make -j 2
+RUN make altinstall
+
+# Install python tools
+RUN apt-get install -y python3-pip
+RUN python3 -m pip install pip jenkins-webapi cfn-lint detect-secrets cfn-flip
+
+# Install ruby and cfn-nag
+RUN apt-get install -y ruby
+RUN gem install cfn-nag
+
+# Install latest aws cli
+RUN wget https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+RUN unzip awscli-exe-linux-x86_64.zip && ./aws/install

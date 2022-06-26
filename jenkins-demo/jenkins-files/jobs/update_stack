@@ -1,0 +1,49 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Get AWS Credentials') {
+            steps {
+                script {
+                    env.AWS_CREDENTIAL_NAME = "aws_account_${env.GIT_BRANCH.split('/')[-1]}"
+                }
+
+                withCredentials([usernamePassword(credentialsId: "${env.AWS_CREDENTIAL_NAME}", usernameVariable: 'AWS_ACCOUNT_ID', passwordVariable: 'AWS_IAM_ROLE')]) {
+                    script {
+                        env.AWS_ACCOUNT_ID = AWS_ACCOUNT_ID
+                        env.AWS_IAM_ROLE = AWS_IAM_ROLE
+                    }
+                }
+            }
+        }
+        stage('Update CloudFormation Stack') {
+            steps {
+                withAWS(region: 'us-east-1', roleAccount: env.AWS_ACCOUNT_ID, role: env.AWS_IAM_ROLE, duration: 3600) {
+                    script {
+                        cfnValidate(file: "${env.WORKSPACE}/stacks/${env.FOLDER_NAME}/${env.COMPONENT}.yaml")
+
+                        if (fileExists("${env.WORKSPACE}/env-params/${env.FOLDER_NAME}/${env.GIT_BRANCH.split('/')[-1]}_${env.COMPONENT}.json")) {
+                            cfnUpdate(
+                                stack: env.CFN_STACK_NAME,
+                                create: false,
+                                file: "${env.WORKSPACE}/stacks/${env.FOLDER_NAME}/${env.COMPONENT}.yaml",
+                                paramsFile: "${env.WORKSPACE}/env-params/${env.FOLDER_NAME}/${env.GIT_BRANCH.split('/')[-1]}_${env.COMPONENT}.json",
+                                onFailure: 'ROLLBACK',
+                                timeoutInMinutes: 60
+                            )
+                        }
+                        else {
+                            cfnUpdate(
+                                stack: env.CFN_STACK_NAME,
+                                create: false,
+                                file: "${env.WORKSPACE}/stacks/${env.FOLDER_NAME}/${env.COMPONENT}.yaml",
+                                onFailure: 'ROLLBACK',
+                                timeoutInMinutes: 60
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

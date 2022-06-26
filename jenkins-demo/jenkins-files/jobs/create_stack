@@ -1,0 +1,51 @@
+pipeline {
+    agent {
+        label 'ecs'
+    }
+
+    stages {
+        stage('Get AWS Credentials') {
+            steps {
+                script {
+                    env.AWS_CREDENTIAL_NAME = "aws_account_${env.GIT_BRANCH.split('/')[-1]}"
+                }
+
+                withCredentials([usernamePassword(credentialsId: "${env.AWS_CREDENTIAL_NAME}", usernameVariable: 'AWS_ACCOUNT_ID', passwordVariable: 'AWS_IAM_ROLE')]) {
+                    script {
+                        env.AWS_ACCOUNT_ID = AWS_ACCOUNT_ID
+                        env.AWS_IAM_ROLE = AWS_IAM_ROLE
+                    }
+                }
+            }
+        }
+        stage('Create CloudFormation Stack') {
+            steps {
+                withAWS(region: 'us-east-1', roleAccount: env.AWS_ACCOUNT_ID, role: env.AWS_IAM_ROLE, duration: 3600) {
+                    cfnValidate(file: "${env.WORKSPACE}/stacks/${env.FOLDER_NAME}/${env.COMPONENT}.yaml")
+
+                    script {
+                        if (fileExists("${env.WORKSPACE}/env-params/${env.FOLDER_NAME}/${env.GIT_BRANCH.split('/')[-1]}_${env.COMPONENT}.json")) {
+                            cfnUpdate(
+                                stack: env.CFN_STACK_NAME,
+                                create: true,
+                                file: "${env.WORKSPACE}/stacks/${env.FOLDER_NAME}/${env.COMPONENT}.yaml",
+                                paramsFile: "${env.WORKSPACE}/env-params/${env.FOLDER_NAME}/${env.GIT_BRANCH.split('/')[-1]}_${env.COMPONENT}.json",
+                                onFailure: 'DELETE',
+                                timeoutInMinutes: 60
+                            )
+                        }
+                        else {
+                            cfnUpdate(
+                                stack: env.CFN_STACK_NAME,
+                                create: true,
+                                file: "${env.WORKSPACE}/stacks/${env.FOLDER_NAME}/${env.COMPONENT}.yaml",
+                                onFailure: 'DELETE',
+                                timeoutInMinutes: 60
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

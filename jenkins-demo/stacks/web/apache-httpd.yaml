@@ -1,0 +1,194 @@
+# This template currently assumes deployment into the us-east-1 region. Update AMI IDs to target a different region.
+#
+# Please subscribe to the Firewall Product on the AWS Marketplace and obtain latest AMI ID before deploying.
+#
+# Enable Appliance Mode on the DMZ Transit Gateway Attachment
+# https://docs.aws.amazon.com/vpc/latest/tgw/transit-gateway-appliance-scenario.html#transit-gateway-appliance-support
+#
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  This template will deploy an AutoScalingGroup based on the latest AmaonzLinux2 AMI
+  It will install Apache httpd and listen on HTTP port 80
+  Then it will provision a public facing ApplicationLoadBalancer to server traffic
+
+Parameters:
+  Namespace:
+    Type: String
+    Default: sample
+    Description: Specify a custom namespace to identify and group resources
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  IamInstanceProfileName:
+    Type: String
+    Default: ''
+  InstanceSize:
+    Type: String
+    Default: t3.medium
+  InstanceCountMin:
+    Type: Number
+    Default: 1
+  InstanceCountMax:
+    Type: Number
+    Default: 1
+  InstanceCountDesired:
+    Type: Number
+    Default: 1
+
+Resources:
+  SecurityGroupPublicAlb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${Namespace}-public-alb'
+      GroupDescription: Grants access from the internet to the public ALB
+      VpcId:
+        Fn::ImportValue: !Sub '${Namespace}-vpc-id'
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: -1
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Namespace}-public-alb'
+        - Key: 'Namespace'
+          Value: !Sub '${Namespace}'
+
+  SecurityGroupPrivateHttp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${Namespace}-private-http'
+      GroupDescription: Grants access from the public ALB over HTTP 80
+      VpcId:
+        Fn::ImportValue: !Sub '${Namespace}-vpc-id'
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !GetAtt SecurityGroupPublicAlb.GroupId
+          FromPort: 80
+          ToPort: 80
+          IpProtocol: tcp
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: -1
+          ToPort: -1
+          IpProtocol: -1
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Namespace}-private-http'
+        - Key: 'Namespace'
+          Value: !Sub '${Namespace}'
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${Namespace}-apache-http'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name: !Ref IamInstanceProfileName
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceSize
+        SecurityGroupIds:
+          - !Ref SecurityGroupPrivateHttp
+        UserData: !Base64 |
+          #!/bin/bash
+          yum update -y
+          amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+          yum install -y httpd mariadb-server
+          usermod -a -G apache ec2-user
+          chown -R ec2-user:apache /var/www
+          chmod 2775 /var/www
+          find /var/www -type d -exec chmod 2775 {} \;
+          find /var/www -type f -exec chmod 0664 {} \;
+          echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
+          systemctl start httpd
+          systemctl enable httpd
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${Namespace}-apache-http'
+      MinSize: !Ref InstanceCountMin
+      MaxSize: !Ref InstanceCountMax
+      DesiredCapacity: !Ref InstanceCountDesired
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 600
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub '${Namespace}-subnet-private-a-id'
+        - Fn::ImportValue: !Sub '${Namespace}-subnet-private-b-id'
+        - Fn::ImportValue: !Sub '${Namespace}-subnet-private-c-id'
+      TargetGroupARNs:
+        - !Ref TargetGroupPublicHttp
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Namespace}-apache-http'
+          PropagateAtLaunch: true
+        - Key: 'Namespace'
+          Value: !Sub '${Namespace}'
+          PropagateAtLaunch: true
+
+  TargetGroupPublicHttp:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${Namespace}-apache-http'
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      VpcId:
+        Fn::ImportValue: !Sub '${Namespace}-vpc-id'
+      Matcher:
+        HttpCode: 200-403
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Namespace}-apache-http'
+        - Key: 'Namespace'
+          Value: !Sub '${Namespace}'
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${Namespace}-public-alb'
+      Type: application
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref SecurityGroupPublicAlb
+      Subnets:
+        - Fn::ImportValue: !Sub '${Namespace}-subnet-public-a-id'
+        - Fn::ImportValue: !Sub '${Namespace}-subnet-public-b-id'
+        - Fn::ImportValue: !Sub '${Namespace}-subnet-public-c-id'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${Namespace}-public-alb'
+        - Key: 'Namespace'
+          Value: !Sub '${Namespace}'
+
+  AlbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref TargetGroupPublicHttp
+
+Outputs:
+  PublicAlb:
+    Description: ARN for the Public ALB
+    Value: !Ref ApplicationLoadBalancer
+    Export:
+      Name: !Sub '${Namespace}-public-alb'
+  PublicAlbDNS:
+    Description: DNS for the Private ALB
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${Namespace}-public-alb-dns'

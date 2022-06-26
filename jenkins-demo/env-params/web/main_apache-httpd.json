@@ -1,0 +1,30 @@
+[
+    {
+        "ParameterKey": "Namespace",
+        "ParameterValue": "use1-prd"
+    },
+    {
+        "ParameterKey": "AmiId",
+        "ParameterValue": "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+    },
+    {
+        "ParameterKey": "IamInstanceProfileName",
+        "ParameterValue": ""
+    },
+    {
+        "ParameterKey": "InstanceSize",
+        "ParameterValue": "t3.large"
+    },
+    {
+        "ParameterKey": "InstanceCountMin",
+        "ParameterValue": "3"
+    },
+    {
+        "ParameterKey": "InstanceCountMax",
+        "ParameterValue": "3"
+    },
+    {
+        "ParameterKey": "InstanceCountDesired",
+        "ParameterValue": "3"
+    }
+]

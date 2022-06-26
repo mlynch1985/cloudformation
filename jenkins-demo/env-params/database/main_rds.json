@@ -1,0 +1,10 @@
+[
+    {
+        "ParameterKey": "Namespace",
+        "ParameterValue": "use1-prd"
+    },
+    {
+        "ParameterKey": "RdsInstanceSize",
+        "ParameterValue": "db.r5.xlarge"
+    }
+]

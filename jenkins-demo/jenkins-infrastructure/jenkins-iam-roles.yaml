@@ -1,0 +1,182 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: CRS Jenkins IAM Roles for CICD Accounts
+
+Parameters:
+  DevAccountId:
+    Type: Number
+  Rc1AccountId:
+    Type: Number
+  CqaAccountId:
+    Type: Number
+  PrdAccountId:
+    Type: Number
+
+Resources:
+  JenkinsEcsIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'jenkins_ecs_cluster_${AWS::Region}'
+      Description: Enables Jenkins ECS Cluster to start and manage ECS Tasks
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  SSMAssumeRole:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Roles: [!Ref JenkinsEcsIamRole]
+      Description: Grants access to assume SSM Roles in target accounts
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Resource:
+              - !Sub 'arn:aws:iam::${DevAccountId}:role/jenkins_ssm_assume_role'
+              - !Sub 'arn:aws:iam::${Rc1AccountId}:role/jenkins_ssm_assume_role'
+              - !Sub 'arn:aws:iam::${CqaAccountId}:role/jenkins_ssm_assume_role'
+              - !Sub 'arn:aws:iam::${PrdAccountId}:role/jenkins_ssm_assume_role'
+
+  SelfAssumeRole:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'GrantSelfAssumeRole'
+      Roles: [!Ref JenkinsEcsIamRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+              - iam:PassRole
+            Resource:
+              - !GetAtt JenkinsEcsIamRole.Arn
+
+  EFSLocalAccessRole:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'GrantEFSAccess'
+      Roles: [!Ref JenkinsEcsIamRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:ClientMount
+              - elasticfilesystem:ClientWrite
+            Resource: !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/*'
+
+  ECSLocalAccessRole:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'GrantECSAccess'
+      Roles: [!Ref JenkinsEcsIamRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecs:ListClusters
+              - ecs:DescribeTaskDefinition
+              - ecs:ListTaskDefinitions
+              - ecs:RegisterTaskDefinition
+              - ecs:DeregisterTaskDefinition
+              - ecs:DescribeContainerInstances
+              - ecs:ListContainerInstances
+              - ecs:DescribeTasks
+              - ecs:RunTask
+              - ecs:StopTask
+            Resource: '*'
+
+  SSMLocalAccessRole:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'GrantSSMAccess'
+      Roles: [!Ref JenkinsEcsIamRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:PutParameter
+              - ssm:PutParameters
+              - secretsmanager:GetSecretValue
+            Resource: '*'
+
+  CloudWatchLogsLocalAccessRole:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: 'GrantCloudWatchLogsAccess'
+      Roles: [!Ref JenkinsEcsIamRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/jenkins/master'
+              - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/jenkins/master:log-stream:*'
+
+  JenkinsImageBuilderIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'jenkins_image_builder_${AWS::Region}'
+      Description: Enables Image Builder pipeline to build Jenkins Docker images
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - ecs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilderECRContainerBuilds
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: Grant-ECS-Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RegisterContainerInstance
+                Resource:
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/default'
+
+  JenkinsImageBuilderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub 'jenkins_image_builder_${AWS::Region}'
+      Roles:
+        - !Ref JenkinsImageBuilderIamRole
+
+Outputs:
+  JenkinsEcsIamRoleName:
+    Value: !Ref JenkinsEcsIamRole
+    Export:
+      Name: 'jenkins-ecs-iam-name'
+  JenkinsEcsIamRoleArn:
+    Value: !GetAtt JenkinsEcsIamRole.Arn
+    Export:
+      Name: 'jenkins-ecs-iam-arn'

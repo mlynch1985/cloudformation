@@ -1,0 +1,32 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Building CFN Stack Jobs') {
+            steps {
+                script {
+                    // Scan through our GIT Repo for any CFN Template located in the stacks folders
+                    files = findFiles(glob: 'stacks/*/*.yaml')
+
+                    // Verify we actually found files
+                    if (files) {
+                        for (file in files) {
+                            // Create our Jenkins jobs for each CFN template we discovered in the first step
+                            jobDsl targets: 'jenkins-files/cfn_stack',
+                                additionalParameters: [
+                                    GIT_URL: env.GIT_URL,
+                                    BRANCH_NAME: env.BRANCH_NAME.split('/')[-1],
+                                    APP_NAME: env.JOB_NAME.split('/')[-2],
+                                    FOLDER_NAME: file.path.split('/')[1],
+                                    FILE_NAME: file.name.substring(0, file.name.lastIndexOf('.'))
+                                ]
+                        }
+                    }
+                    else {
+                        print('\n\n ### UNABLE TO FIND ANY CFN TEMPLATES IN stacks folders')
+                    }
+                }
+            }
+        }
+    }
+}
