@@ -7,7 +7,7 @@ This repository contains various CloudFormation based projects I am currently or
 
 ----
 ## Projects
-[Project 1](https://github.com/mlynch1985/cloudformation)
+[Example Stacks](https://github.com/mlynch1985/cloudformation/tree/main/example-stacks)
 
 
 ----
