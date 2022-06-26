@@ -7,9 +7,9 @@ This repository contains various CloudFormation based projects I am currently or
 
 ----
 ## Projects
-[Example Stacks](https://github.com/mlynch1985/cloudformation/tree/main/example-stacks)
-[GitLab Pipelines](https://github.com/mlynch1985/cloudformation/tree/main/gitlab-pipelines)
-[Jenkins Demo](https://github.com/mlynch1985/cloudformation/tree/main/jenkins-demo)
+- [Example Stacks](https://github.com/mlynch1985/cloudformation/tree/main/example-stacks)
+- [GitLab Pipelines](https://github.com/mlynch1985/cloudformation/tree/main/gitlab-pipelines)
+- [Jenkins Demo](https://github.com/mlynch1985/cloudformation/tree/main/jenkins-demo)
 
 
 ----
