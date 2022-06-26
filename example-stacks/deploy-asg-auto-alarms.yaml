@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: This CloudFormation Stack will create and delete CloudWatch Alarms automatically for EC2 instances that belong to a specific AutoScalingGroup based on the name of the ASG.
+
+Parameters:
+  AutoScalingGroupName:
+    AllowedPattern: [\u0020-\uD7FF\uE000-\uFFFD\uD800\uDC00-\uDBFF\uDFFF\r\n\t]*
+    ConstraintDescription: 'Must be a valid AutoScalingGroup name (ref: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-as-group.html#cfn-autoscaling-autoscalinggroup-autoscalinggroupname)'
+    Description: Please specify the name of the AutoScalingGroup in which you want to automatically manage CloudWatch alarms for
+    Type: String
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Grants Lambda access to CloudWatch Alarms and EC2:DescribeInstances
+      RoleName: !Sub '${AWS::StackName}-${AWS::Region}-auto-cw-alarms'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GrantCloudWatchAlarms
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - CloudWatch:DescribeAlarms
+                  - CloudWatch:PutMetricAlarm
+                  - CloudWatch:DeleteAlarms
+                  - ec2:DescribeInstances
+                Resource: '*'
+
+  CloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: !Sub This rule will trigger the ${AWS::StackName}-${AWS::Region}-auto-cw-alarms Lambda function to create/delete CloudWatch Alarms automatically when an EC2 instance id launched or terminated
+      EventPattern:
+        source:
+          - aws.autoscaling
+        detail-type:
+          - EC2 Instance Launch Successful
+          - EC2 Instance Terminate Successful
+        detail:
+          AutoScalingGroupName:
+            - !Ref AutoScalingGroupName
+      Targets:
+        - Arn: !GetAtt LambdaFunction.Arn
+          Id: CloudWatchAlarmsLambdaFunction
+          InputTransformer:
+            InputPathsMap:
+              instance_id: '$.detail.EC2InstanceId'
+              detail_type: '$.detail-type'
+              auto_scaling_group_name: '$.detail.AutoScalingGroupName'
+            InputTemplate: |
+              {
+                  "instance_id": <instance_id>,
+                  "detail_type": <detail_type>,
+                  "auto_scaling_group_name": <auto_scaling_group_name>
+              }
+
+  LambdaFunctionPermissions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CloudWatchEventRule.Arn
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures: arm64
+      Description: This function will create/delete CloudWatch Alarms when an EC2 instance is launched or terminated for a specified AutoScalingGroup
+      FunctionName: ${AWS::StackName}-${AWS::Region}-auto-cw-alarms
+      Handler: index.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+
+          def lambda_handler(event, context):
+            ec2 = boto3.client('ec2')
+            cloudwatch = boto3.client('cloudwatch')
+
+            # Capture key details from the triggered CloudWatch event
+            detail_type = event['detail_type']
+            instance_id = event['instance_id']
+            asg_name = event['auto_scaling_group_name']
+
+            # Create a new alarm if an instance was launched
+            if detail_type == "EC2 Instance Launch Successful":
+              print("\n{} was launched, attempting to create CloudWatch alarms... ".format(instance_id))
+
+              # Query AWS for the affected EC2 instance and store its details
+              try:
+                instance_object = ec2.describe_instances(InstanceIds=[instance_id])
+              except Exception as inst:
+                raise Exception(inst)
+
+              # Create high_cpu alarm
+              try:
+                cloudwatch.put_metric_alarm(
+                  AlarmName="{}_{}_high_cpu".format(asg_name, instance_id),
+                  AlarmDescription="This metric alarm tracks CPU usage above 80% over 5 minutes",
+                  MetricName="CPUUtilization",
+                  Namespace="AWS/EC2",
+                  Statistic="Average",
+                  ComparisonOperator="GreaterThanOrEqualToThreshold",
+                  Period=60,
+                  Unit='Percent',
+                  EvaluationPeriods=5,
+                  Threshold=80,
+                  Dimensions=[
+                    {
+                      "Name": "InstanceId",
+                      "Value": instance_id
+                    }
+                  ]
+                )
+
+                print('high cpu alarm successfully created\n')
+
+              except Exception as inst:
+                raise Exception(inst)
+
+            # Delete existing alarm if an instance was terminated
+            elif detail_type == "EC2 Instance Terminate Successful":
+              print("\n{} was terminated, attempting to remove CloudWatch alarms...".format(instance_id))
+
+              try:
+                cloudwatch.delete_alarms(
+                  AlarmNames=[
+                    "{}_{}_high_cpu".format(asg_name, instance_id)
+                  ]
+                )
+
+                print('high cpu alarm successfully removed\n')
+
+              except Exception as inst:
+                raise Exception(inst)
