@@ -2,19 +2,88 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: This template will deploy a sample Linux HTTPD site hosted in an AutoScaling Group.
 
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - PublicSubnets
+          - PrivateSubnets
+          - ElbCidr
+      - Label:
+          default: Linux ASG Configuration
+        Parameters:
+          - AmiId
+          - InstanceType
+          - AsgDesired
+          - AsgMin
+          - AsgMax
+
 Parameters:
-  LatestAmiId:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC ID where we should deploy this stack
+  PublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Public facing Subnets for the ELB
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Private facing Subnets for the Linux ASG
+  ElbCidr:
+    Type: String
+    Description: Provide a CIDR to allow source traffic to the ELB
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Default: 172.31.0.0/16
+  AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Provide the SSM Parameter path to a valid AMI ID
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  InstanceType:
+    Type: String
+    Description: Select the EC2 Instance Size for the Linux ASG Instances
+    Default: t3.small
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+  AsgDesired:
+    Type: Number
+    Description: Specify the number of instances to launch by default
+    MinValue: 1
+    MaxValue: 10
+    Default: 3
+  AsgMin:
+    Type: Number
+    Description: Specify the minimum number of instances to launch
+    MinValue: 1
+    MaxValue: 10
+    Default: 1
+  AsgMax:
+    Type: Number
+    Description: Specify the maximum number of instances to launch
+    MinValue: 1
+    MaxValue: 10
+    Default: 6
 
 Resources:
   IamRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${AWS::StackName}-LinuxASG-Role'
-      Description: 'This role will grant EC2 access to communicate with Systems Manager'
-      MaxSessionDuration: 3600 # in seconds
-      Path: /
+      RoleName: !Sub '${AWS::StackName}-EC2-ApacheHttpd'
+      Description: This role will grant EC2 access to communicate with Systems Manager and CloudWatch
+      MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -25,73 +94,66 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Sub '${AWS::StackName}-LinuxASG-Profile'
-      Path: /
+      InstanceProfileName: !Sub '${AWS::StackName}-EC2-ApacheHttpd'
       Roles:
         - !Ref IamRole
 
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub '${AWS::StackName}-LinuxASG-ELBSecurityGroup'
-      GroupDescription: 'This group will allow HTTP access to the Elastic Load Balancer from the world'
-      VpcId: !ImportValue VPCID
+      GroupDescription: !Sub 'This group will allow HTTP access to the Elastic Load Balancer from ${ElbCidr}'
+      VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - Description: 'Grants HTTP access from the world'
-          IpProtocol: tcp
+        - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
+          CidrIp: !Ref ElbCidr
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-LinuxASG-ELBSecurityGroup'
+          Value: !Sub '${AWS::StackName}-ELB-ApacheHttpd'
 
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub '${AWS::StackName}-LinuxASG-EC2SecurityGroup'
-      GroupDescription: 'This group will allow HTTP access to the EC2 Instances from the Load Balancer'
-      VpcId: !ImportValue VPCID
+      GroupDescription: This group will allow HTTP access to the EC2 Instances from the Load Balancer
+      VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - Description: 'Grants HTTP access from the load balancer'
-          IpProtocol: tcp
+        - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref ELBSecurityGroup
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-LinuxASG-EC2SecurityGroup'
+          Value: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
 
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub '${AWS::StackName}-LinuxASG'
+      Name: !Sub '${AWS::StackName}-ApacheHttpd'
       Scheme: internet-facing
       SecurityGroups:
         - !Ref ELBSecurityGroup
-      Subnets:
-        - !ImportValue PublicSubnetA
-        - !ImportValue PublicSubnetB
-        - !ImportValue PublicSubnetC
+      Subnets: !Ref PublicSubnets
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AWS::StackName}-LinuxASG'
-      VpcId: !ImportValue VPCID
+      Name: !Sub '${AWS::StackName}-ApacheHttpd'
+      VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
       TargetType: instance
-      HealthCheckIntervalSeconds: 30 # seconds
+      HealthCheckIntervalSeconds: 30
       HealthCheckPath: /
       HealthCheckPort: 80
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5 # seconds
+      HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 3
       UnhealthyThresholdCount: 2
 
@@ -108,12 +170,12 @@ Resources:
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
-      LaunchTemplateName: !Sub '${AWS::StackName}-LinuxASG-LaunchTemplate'
+      LaunchTemplateName: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
       LaunchTemplateData:
         IamInstanceProfile:
           Name: !Ref InstanceProfile
-        ImageId: !Ref LatestAmiId
-        InstanceType: t3.micro
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
         SecurityGroupIds:
           - !Ref EC2SecurityGroup
         UserData: !Base64 |
@@ -122,37 +184,43 @@ Resources:
           yum install httpd -y
           service httpd start
           chkconfig httpd on
+          echo "Hello World from $(hostname -f)" > /var/www/html/index.html
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
-      AutoScalingGroupName: !Sub '${AWS::StackName}-LinuxASG-AutoScalingGroup'
-      AvailabilityZones:
-        - !Select [0, !GetAZs '']
-        - !Select [1, !GetAZs '']
-        - !Select [2, !GetAZs '']
-      DesiredCapacity: 3
+      AutoScalingGroupName: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
       HealthCheckGracePeriod: 180
       HealthCheckType: ELB
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
-      MaxSize: 3
-      MinSize: 3
+      DesiredCapacity: !Ref AsgDesired
+      MinSize: !Ref AsgMin
+      MaxSize: !Ref AsgMax
       TargetGroupARNs:
         - !Ref TargetGroup
-      VPCZoneIdentifier:
-        - !ImportValue PrivateSubnetA
-        - !ImportValue PrivateSubnetB
-        - !ImportValue PrivateSubnetC
+      VPCZoneIdentifier: !Ref PrivateSubnets
       Tags:
         - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-LinuxASG-AutoScalingGroup'
+          Value: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
           PropagateAtLaunch: true
+
+  AutoScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      # AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      # MetricAggregationType: Average # Minimum | Maximum | Average
+      PolicyType: TargetTrackingScaling # SimpleScaling | StepScaling | TargetTrackingScaling
+      # ScalingAdjustment: 1
+      TargetTrackingConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 80
 
 Outputs:
   LinuxSiteUrl:
     Value: !GetAtt ElasticLoadBalancer.DNSName
     Description: Public facing url of our sample website
-    Export:
-      Name: LinuxSiteUrl
