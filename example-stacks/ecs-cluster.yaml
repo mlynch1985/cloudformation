@@ -2,14 +2,65 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: This template will deploy a sample ECS Cluster hosting a PHP site across two availability zones.
 
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - PublicSubnets
+          - PrivateSubnets
+          - ElbCidr
+      - Label:
+          default: Linux ASG Configuration
+        Parameters:
+          - CpuAmount
+          - MemoryAmount
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC ID where we should deploy this stack
+  PublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Public facing Subnets for the ELB
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Private facing Subnets for the ECS Cluster
+  ElbCidr:
+    Type: String
+    Description: Provide a CIDR to allow source traffic to the ELB
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Default: 172.31.0.0/16
+  CpuAmount:
+    Type: Number
+    Description: Specify the number of CPU Units to assign to the ECS Task
+    Default: 256
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+  MemoryAmount:
+    Type: Number
+    Description: Specify the number of Memory Units to assign to the ECS Task
+    Default: 512
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+      - 10240
+      - 16384
+
 Resources:
   IamExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${AWS::StackName}-ECS-Execution-Role'
-      Description: 'This role will grant ECS permission to execute API calls'
-      MaxSessionDuration: 3600 # in seconds
-      Path: /
+      RoleName: !Sub '${AWS::StackName}-ecs-cluster'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -36,71 +87,59 @@ Resources:
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub '${AWS::StackName}-ECS-ELBSecurityGroup'
-      GroupDescription: 'This group will allow HTTP access to the ECS LoadBalancer'
-      VpcId: !ImportValue VPCID
+      GroupDescription: This group will allow HTTP access to the ECS LoadBalancer
+      VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - Description: 'Grants HTTP access from the world'
-          IpProtocol: tcp
+        - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
+          CidrIp: !Ref ElbCidr
       SecurityGroupEgress:
-        - Description: 'Grants full outbound access'
-          IpProtocol: tcp
-          FromPort: -1
-          ToPort: -1
+        - IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-ECS-ELBSecurityGroup'
+          Value: !Sub '${AWS::StackName}-elb'
 
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub '${AWS::StackName}-ECS-ContainerSecurityGroup'
-      GroupDescription: 'This group will allow HTTP access to the ECS Instances from the Load Balancer'
-      VpcId: !ImportValue VPCID
+      GroupDescription: This group will allow HTTP access to the ECS Instances from the Load Balancer
+      VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - Description: 'Grants HTTP access from the load balancer'
-          IpProtocol: tcp
+        - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref ELBSecurityGroup
       SecurityGroupEgress:
-        - Description: 'Grants full outbound access'
-          IpProtocol: tcp
-          FromPort: -1
-          ToPort: -1
+        - IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-ECS-ContainerSecurityGroup'
+          Value: !Sub '${AWS::StackName}-ecs-cluster'
 
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub '${AWS::StackName}-ECS-LoadBalancer'
+      Name: !Sub '${AWS::StackName}-ecs-cluster'
       Scheme: internet-facing
       SecurityGroups:
         - !Ref ELBSecurityGroup
-      Subnets:
-        - !ImportValue PublicSubnetA
-        - !ImportValue PublicSubnetB
+      Subnets: !Ref PublicSubnets
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AWS::StackName}-ECS-TargetGroup'
-      VpcId: !ImportValue VPCID
+      Name: !Sub '${AWS::StackName}-ecs-cluster'
+      VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
       TargetType: ip
-      HealthCheckIntervalSeconds: 30 # seconds
+      HealthCheckIntervalSeconds: 30
       HealthCheckPath: /
-      HealthCheckPort: 80
+      HealthCheckPort: '80'
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5 # seconds
+      HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 3
       UnhealthyThresholdCount: 2
 
@@ -117,13 +156,13 @@ Resources:
   CloudWatchLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub '${AWS::StackName}-ECS-LogGroup'
-      RetentionInDays: 1
+      LogGroupName: !Sub '${AWS::StackName}-ecs-cluster'
+      RetentionInDays: 30
 
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Sub '${AWS::StackName}-Sample-Cluster'
+      ClusterName: !Sub '${AWS::StackName}-ecs-cluster'
       ClusterSettings:
         - Name: containerInsights
           Value: enabled
@@ -131,14 +170,14 @@ Resources:
   ECSTask:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Cpu: 256
-      Memory: 512
+      Cpu: !Ref CpuAmount
+      Memory: !Ref MemoryAmount
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
       ExecutionRoleArn: !GetAtt IamExecutionRole.Arn
       ContainerDefinitions:
-        - Name: !Sub '${AWS::StackName}-ECS-Container'
+        - Name: !Sub '${AWS::StackName}-ecs-cluster'
           Image: amazon/amazon-ecs-sample
           PortMappings:
             - ContainerPort: 80
@@ -166,13 +205,11 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
-          Subnets:
-            - !ImportValue PrivateSubnetA
-            - !ImportValue PrivateSubnetB
+          Subnets: !Ref PrivateSubnets
           SecurityGroups:
             - !Ref ECSSecurityGroup
       LoadBalancers:
-        - ContainerName: !Sub '${AWS::StackName}-ECS-Container'
+        - ContainerName: !Sub '${AWS::StackName}-ecs-cluster'
           ContainerPort: 80
           TargetGroupArn: !Ref TargetGroup
 
