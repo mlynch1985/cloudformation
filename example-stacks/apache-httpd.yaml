@@ -151,7 +151,7 @@ Resources:
       TargetType: instance
       HealthCheckIntervalSeconds: 30
       HealthCheckPath: /
-      HealthCheckPort: 80
+      HealthCheckPort: '80'
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 3
@@ -209,11 +209,8 @@ Resources:
   AutoScalingPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
-      # AdjustmentType: ChangeInCapacity
       AutoScalingGroupName: !Ref AutoScalingGroup
-      # MetricAggregationType: Average # Minimum | Maximum | Average
-      PolicyType: TargetTrackingScaling # SimpleScaling | StepScaling | TargetTrackingScaling
-      # ScalingAdjustment: 1
+      PolicyType: TargetTrackingScaling
       TargetTrackingConfiguration:
         DisableScaleIn: false
         PredefinedMetricSpecification:
