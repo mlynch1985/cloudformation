@@ -115,9 +115,7 @@ Resources:
           ToPort: 80
           CidrIp: !Ref ElbCidr
       SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: -1
-          ToPort: -1
+        - IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
@@ -134,9 +132,7 @@ Resources:
           ToPort: 80
           SourceSecurityGroupId: !Ref ELBSecurityGroup
       SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: -1
-          ToPort: -1
+        - IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
