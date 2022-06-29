@@ -4,17 +4,17 @@ Description: This CloudFormation Stack will create and delete CloudWatch Alarms 
 
 Parameters:
   AutoScalingGroupName:
-    AllowedPattern: [\u0020-\uD7FF\uE000-\uFFFD\uD800\uDC00-\uDBFF\uDFFF\r\n\t]*
-    ConstraintDescription: 'Must be a valid AutoScalingGroup name (ref: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-as-group.html#cfn-autoscaling-autoscalinggroup-autoscalinggroupname)'
-    Description: Please specify the name of the AutoScalingGroup in which you want to automatically manage CloudWatch alarms for
     Type: String
+    AllowedPattern: ^[0-9a-zA-Z-_]{1,64}$
+    ConstraintDescription: Please specify a valid ASG name consisting of alphanumeric characters, hypers and underscores and no longer than 64 characters long
+    Description: Please specify the name of the AutoScalingGroup in which you want to automatically manage CloudWatch alarms for
 
 Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       Description: Grants Lambda access to CloudWatch Alarms and EC2:DescribeInstances
-      RoleName: !Sub '${AWS::StackName}-${AWS::Region}-auto-cw-alarms'
+      RoleName: !Sub '${AWS::StackName}-auto-cw-alarms'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -42,7 +42,7 @@ Resources:
   CloudWatchEventRule:
     Type: AWS::Events::Rule
     Properties:
-      Description: !Sub This rule will trigger the ${AWS::StackName}-${AWS::Region}-auto-cw-alarms Lambda function to create/delete CloudWatch Alarms automatically when an EC2 instance id launched or terminated
+      Description: !Sub This rule will trigger the ${AWS::StackName}-auto-cw-alarms Lambda function to create/delete CloudWatch Alarms automatically when an EC2 instance id launched or terminated
       EventPattern:
         source:
           - aws.autoscaling
@@ -78,11 +78,10 @@ Resources:
   LambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Architectures: arm64
+      Architectures: [arm64]
       Description: This function will create/delete CloudWatch Alarms when an EC2 instance is launched or terminated for a specified AutoScalingGroup
-      FunctionName: ${AWS::StackName}-${AWS::Region}-auto-cw-alarms
+      FunctionName: !Sub ${AWS::StackName}-auto-cw-alarms
       Handler: index.lambda_handler
-      MemorySize: 128
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.9
       Timeout: 30
