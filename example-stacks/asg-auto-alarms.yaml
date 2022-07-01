@@ -12,9 +12,13 @@ Parameters:
 Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Enabling wildcard on resource to allow for any ec2 instance or alarm for demo purposes
     Properties:
       Description: Grants Lambda access to CloudWatch Alarms and EC2:DescribeInstances
-      RoleName: !Sub '${AWS::StackName}-auto-cw-alarms'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -77,11 +81,17 @@ Resources:
 
   LambdaFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This Lambda function should not be provisioned within a VPC
     Properties:
       Architectures: [arm64]
       Description: This function will create/delete CloudWatch Alarms when an EC2 instance is launched or terminated for a specified AutoScalingGroup
       FunctionName: !Sub ${AWS::StackName}-auto-cw-alarms
       Handler: index.lambda_handler
+      ReservedConcurrentExecutions: 5
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.9
       Timeout: 30
