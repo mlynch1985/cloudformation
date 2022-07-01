@@ -14,7 +14,6 @@ Resources:
   IamRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${AWS::StackName}-ec2-imagebuilder'
       Description: This role will grant EC2 ImageBuilder the minimum neccessary permissions to allow pipelines to execute
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -79,7 +78,7 @@ Resources:
     Type: AWS::ImageBuilder::InfrastructureConfiguration
     Properties:
       Name: !Sub '${AWS::StackName}-HelloWorld-Infrastructure'
-      InstanceProfileName: !Ref InstanceProfile # !Sub '${AWS::StackName}-ec2-imagebuilder'
+      InstanceProfileName: !Ref InstanceProfile
       SecurityGroupIds: !Ref SecurityGroups
       SubnetId: !Ref Subnet
       TerminateInstanceOnFailure: True
