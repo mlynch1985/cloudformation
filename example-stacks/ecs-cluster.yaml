@@ -11,7 +11,7 @@ Metadata:
           - VpcId
           - PublicSubnets
           - PrivateSubnets
-          - ElbCidr
+          - SourceCidr
       - Label:
           default: Linux ASG Configuration
         Parameters:
@@ -28,7 +28,7 @@ Parameters:
   PrivateSubnets:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Select the Private facing Subnets for the ECS Cluster
-  ElbCidr:
+  SourceCidr:
     Type: String
     Description: Provide a CIDR to allow source traffic to the ELB
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
@@ -56,11 +56,62 @@ Parameters:
       - 10240
       - 16384
 
+Mappings:
+  RegionMap:
+    us-east-1:
+      ElbAccountId: 127311923021
+    us-east-2:
+      ElbAccountId: 033677994240
+    us-west-1:
+      ElbAccountId: 027434742980
+    us-west-2:
+      ElbAccountId: 797873946194
+    af-south-1:
+      ElbAccountId: 098369216593
+    ca-central-1:
+      ElbAccountId: 985666609251
+    eu-central-1:
+      ElbAccountId: 054676820928
+    eu-west-1:
+      ElbAccountId: 156460612806
+    eu-west-2:
+      ElbAccountId: 652711504416
+    eu-south-1:
+      ElbAccountId: 635631232127
+    eu-west-3:
+      ElbAccountId: 009996457667
+    eu-north-1:
+      ElbAccountId: 897822967062
+    ap-east-1:
+      ElbAccountId: 754344448648
+    ap-northeast-1:
+      ElbAccountId: 582318560864
+    ap-northeast-2:
+      ElbAccountId: 600734575887
+    ap-northeast-3:
+      ElbAccountId: 383597477331
+    ap-southeast-1:
+      ElbAccountId: 114774131450
+    ap-southeast-2:
+      ElbAccountId: 783225319266
+    ap-southeast-3:
+      ElbAccountId: 589379963580
+    ap-south-1:
+      ElbAccountId: 718504428378
+    me-south-1:
+      ElbAccountId: 076674570225
+    sa-east-1:
+      ElbAccountId: 507241528517
+
 Resources:
   IamExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Enabling wildcard on resources for demo purposes
     Properties:
-      RoleName: !Sub '${AWS::StackName}-ecs-cluster'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -84,18 +135,115 @@ Resources:
                   - 'logs:PutLogEvents'
                 Resource: '*'
 
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in CloudWatch Logs
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          - Sid: Enable CloudWatch Logs
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: We are opting to not activate access logging for demo purposes
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256 # aws:kms is not currently support as of 2022.07.01
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOlderThan30Days
+            Status: Enabled
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-S3-ECSCluster'
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GrantPutObject
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              AWS: !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
+                  - ':root'
+          - Sid: GrantGetBucketAcl
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              Service: logdelivery.elb.amazonaws.com
+
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
     Properties:
       GroupDescription: This group will allow HTTP access to the ECS LoadBalancer
       VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - IpProtocol: tcp
+        - Description: Grants inbound HTTP access from external sources
+          IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: !Ref ElbCidr
+          CidrIp: !Ref SourceCidr
       SecurityGroupEgress:
-        - IpProtocol: -1
+        - Description: Grants HTTP outbound only
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
@@ -103,16 +251,25 @@ Resources:
 
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
     Properties:
       GroupDescription: This group will allow HTTP access to the ECS Instances from the Load Balancer
       VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - IpProtocol: tcp
+        - Description: Grants inbound HTTP access from ELB
+          IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref ELBSecurityGroup
       SecurityGroupEgress:
-        - IpProtocol: -1
+        - Description: Grants outbound to all
+          IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
@@ -120,8 +277,14 @@ Resources:
 
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - S3BucketPolicy
     Properties:
-      Name: !Sub '${AWS::StackName}-ecs-cluster'
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value: !Ref S3Bucket
       Scheme: internet-facing
       SecurityGroups:
         - !Ref ELBSecurityGroup
@@ -145,6 +308,11 @@ Resources:
 
   ELBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W56
+            reason: Using HTTP instead of HTTPS for demo purposes
     Properties:
       LoadBalancerArn: !Ref ElasticLoadBalancer
       Protocol: HTTP
@@ -156,6 +324,7 @@ Resources:
   CloudWatchLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
+      KmsKeyId: !GetAtt KmsKey.Arn
       LogGroupName: !Sub '${AWS::StackName}-ecs-cluster'
       RetentionInDays: 30
 
