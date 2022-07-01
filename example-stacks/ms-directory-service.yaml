@@ -2,44 +2,59 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: This template will deploy a sample Microsoft Active Directory environment and launch a Windows Server 2019 EC2 instance joined to the domain.  Additionally, we will install the latest CloudWatch Server Agent.
 
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - PrimarySubnet
+          - SecondarySubnet
+
 Parameters:
-  LatestAmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC ID where we should deploy this stack
+  PrimarySubnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select the subnet to be used for the Primary MSAD Node
+  SecondarySubnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select the subnet to be used for the Secondary MSAD Node
 
 Resources:
-  IamRole:
-    Type: AWS::IAM::Role
+  KmsKey:
+    Type: AWS::KMS::Key
     Properties:
-      RoleName: !Sub '${AWS::StackName}-MSAD-Role'
-      Description: 'This role will grant EC2 access to communiate with Systems Manager and CloudWatch'
-      MaxSessionDuration: 3600 # in seconds
-      Path: /
-      AssumeRolePolicyDocument:
+      Description: This key will encrypt data stored in Secrets Manager
+      EnableKeyRotation: true
+      KeyPolicy:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
             Principal:
-              Service:
-                - ec2.amazonaws.com
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          - Sid: Enable CloudWatch Logs
+            Effect: 'Allow'
             Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
-        - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
-        - 'arn:aws:iam::aws:policy/AmazonSSMDirectoryServiceAccess'
-
-  InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      InstanceProfileName: !Sub '${AWS::StackName}-MSAD-Profile'
-      Path: /
-      Roles:
-        - !Ref IamRole
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+              - kms:CreateGrant
+            Resource: '*'
+            Principal:
+              Service: !Sub 'secretsmanager.${AWS::Region}.amazonaws.com'
 
   MSADSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
+      KmsKeyId: !GetAtt KmsKey.Arn
       Name: !Sub '${AWS::StackName}-MSAD-RootCredentials'
       Description: 'Sample Active Directory Root Credentials'
       GenerateSecretString:
@@ -55,37 +70,10 @@ Resources:
       Password: !Join ['', ['{{resolve:secretsmanager:', !Ref MSADSecret, ':SecretString}}']]
       ShortName: CORP
       VpcSettings:
-        VpcId: !ImportValue VPCID
+        VpcId: !Ref VpcId
         SubnetIds:
-          - !ImportValue PrivateSubnetA
-          - !ImportValue PrivateSubnetB
-
-  Instance:
-    Type: AWS::EC2::Instance
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      IamInstanceProfile: !Ref InstanceProfile
-      ImageId: !Ref LatestAmiId
-      InstanceType: m3.large
-      SecurityGroupIds:
-        - !ImportValue DefaultSecurityGroup
-      SubnetId: !ImportValue PublicSubnetA
-      SsmAssociations:
-        - DocumentName: AWS-JoinDirectoryServiceDomain
-          AssociationParameters:
-            - Key: directoryId
-              Value:
-                - !Ref MicrosoftAD
-            - Key: directoryName
-              Value:
-                - 'corp.example.com'
-            - Key: dnsIpAddresses
-              Value:
-                - !Select [0, !GetAtt MicrosoftAD.DnsIpAddresses]
-                - !Select [1, !GetAtt MicrosoftAD.DnsIpAddresses]
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-MSAD-Instance'
+          - !Ref PrimarySubnet
+          - !Ref SecondarySubnet
 
 Outputs:
   MSADId:
@@ -99,15 +87,3 @@ Outputs:
     Description: The associated DNS Server IP addresses for our Microsoft Active Directory Resource
     Export:
       Name: DNSServers
-
-  MSADSecret:
-    Value: !Ref MSADSecret
-    Description: Location of our MS Active Directory Root Password
-    Export:
-      Name: MSADSecret
-
-  MSADInstanceDNS:
-    Value: !GetAtt Instance.PublicDnsName
-    Description: The public DNS of our Instance
-    Export:
-      Name: MSADInstanceDNS
