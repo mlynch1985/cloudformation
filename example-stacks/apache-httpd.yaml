@@ -11,7 +11,7 @@ Metadata:
           - VpcId
           - PublicSubnets
           - PrivateSubnets
-          - ElbCidr
+          - SourceCidr
       - Label:
           default: Linux ASG Configuration
         Parameters:
@@ -31,7 +31,7 @@ Parameters:
   PrivateSubnets:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Select the Private facing Subnets for the Linux ASG
-  ElbCidr:
+  SourceCidr:
     Type: String
     Description: Provide a CIDR to allow source traffic to the ELB
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
@@ -149,36 +149,10 @@ Resources:
       Roles:
         - !Ref IamRole
 
-  KmsKey:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: This key will encrypt data stored in S3 Bucket for our ELB Access Logs
-      EnableKeyRotation: true
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: Enable IAM Policies
-            Effect: 'Allow'
-            Action: 'kms:*'
-            Resource: '*'
-            Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-          - Sid: Enable ELB Log Delivery Service to use this key
-            Effect: 'Allow'
-            Action: 'kms:GenerateDataKey'
-            Resource: '*'
-            Principal:
-              AWS: !Join
-                - ''
-                - - 'arn:aws:iam::'
-                  - !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
-                  - ':root'
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-KMS-ApacheHttpd'
-
   S3Bucket:
     Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -190,8 +164,7 @@ Resources:
         ServerSideEncryptionConfiguration:
           - BucketKeyEnabled: true
             ServerSideEncryptionByDefault:
-              KMSMasterKeyID: !Ref KmsKey
-              SSEAlgorithm: aws:kms
+              SSEAlgorithm: AES256 # aws:kms is not currently support as of 2022.07.01
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOlderThan30Days
@@ -244,14 +217,14 @@ Resources:
           - id: W5
             reason: Enabling outbound to all destinations for demo purposes
     Properties:
-      GroupDescription: !Sub 'This group will allow HTTP access to the Elastic Load Balancer from ${ElbCidr}'
+      GroupDescription: !Sub 'This group will allow HTTP access to the Elastic Load Balancer from ${SourceCidr}'
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - Description: Grants inbound HTTP access from external sources
           IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: !Ref ElbCidr
+          CidrIp: !Ref SourceCidr
       SecurityGroupEgress:
         - Description: Grants HTTP outbound only
           IpProtocol: tcp
@@ -290,6 +263,8 @@ Resources:
 
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - S3BucketPolicy
     Properties:
       LoadBalancerAttributes:
         - Key: access_logs.s3.enabled
@@ -341,6 +316,8 @@ Resources:
           Name: !Ref InstanceProfile
         ImageId: !Ref AmiId
         InstanceType: !Ref InstanceType
+        MetadataOptions:
+          HttpTokens: required
         SecurityGroupIds:
           - !Ref EC2SecurityGroup
         UserData: !Base64 |
