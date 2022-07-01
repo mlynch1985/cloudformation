@@ -77,13 +77,58 @@ Parameters:
     MaxValue: 10
     Default: 6
 
+Mappings:
+  RegionMap:
+    us-east-1:
+      ElbAccountId: 127311923021
+    us-east-2:
+      ElbAccountId: 033677994240
+    us-west-1:
+      ElbAccountId: 027434742980
+    us-west-2:
+      ElbAccountId: 797873946194
+    af-south-1:
+      ElbAccountId: 098369216593
+    ca-central-1:
+      ElbAccountId: 985666609251
+    eu-central-1:
+      ElbAccountId: 054676820928
+    eu-west-1:
+      ElbAccountId: 156460612806
+    eu-west-2:
+      ElbAccountId: 652711504416
+    eu-south-1:
+      ElbAccountId: 635631232127
+    eu-west-3:
+      ElbAccountId: 009996457667
+    eu-north-1:
+      ElbAccountId: 897822967062
+    ap-east-1:
+      ElbAccountId: 754344448648
+    ap-northeast-1:
+      ElbAccountId: 582318560864
+    ap-northeast-2:
+      ElbAccountId: 600734575887
+    ap-northeast-3:
+      ElbAccountId: 383597477331
+    ap-southeast-1:
+      ElbAccountId: 114774131450
+    ap-southeast-2:
+      ElbAccountId: 783225319266
+    ap-southeast-3:
+      ElbAccountId: 589379963580
+    ap-south-1:
+      ElbAccountId: 718504428378
+    me-south-1:
+      ElbAccountId: 076674570225
+    sa-east-1:
+      ElbAccountId: 507241528517
+
 Resources:
   IamRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub '${AWS::StackName}-EC2-ApacheHttpd'
       Description: This role will grant EC2 access to communicate with Systems Manager and CloudWatch
-      MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -100,22 +145,118 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Sub '${AWS::StackName}-EC2-ApacheHttpd'
+      InstanceProfileName: !Ref IamRole
       Roles:
         - !Ref IamRole
 
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in S3 Bucket for our ELB Access Logs
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          - Sid: Enable ELB Log Delivery Service to use this key
+            Effect: 'Allow'
+            Action: 'kms:GenerateDataKey'
+            Resource: '*'
+            Principal:
+              AWS: !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
+                  - ':root'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-KMS-ApacheHttpd'
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: We are opting to not activate access logging for demo purposes
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref KmsKey
+              SSEAlgorithm: aws:kms
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOlderThan30Days
+            Status: Enabled
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-S3-ApacheHttpd'
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GrantPutObject
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              AWS: !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
+                  - ':root'
+          - Sid: GrantGetBucketAcl
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              Service: logdelivery.elb.amazonaws.com
+
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling outbound to all destinations for demo purposes
     Properties:
       GroupDescription: !Sub 'This group will allow HTTP access to the Elastic Load Balancer from ${ElbCidr}'
       VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - IpProtocol: tcp
+        - Description: Grants inbound HTTP access from external sources
+          IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: !Ref ElbCidr
       SecurityGroupEgress:
-        - IpProtocol: -1
+        - Description: Grants HTTP outbound only
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
@@ -123,16 +264,25 @@ Resources:
 
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
     Properties:
       GroupDescription: This group will allow HTTP access to the EC2 Instances from the Load Balancer
       VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - IpProtocol: tcp
+        - Description: Grants inbound HTTP access from ELB
+          IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !Ref ELBSecurityGroup
       SecurityGroupEgress:
-        - IpProtocol: -1
+        - Description: Grants outbound to all
+          IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
@@ -141,7 +291,11 @@ Resources:
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub '${AWS::StackName}-ApacheHttpd'
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value: !Ref S3Bucket
       Scheme: internet-facing
       SecurityGroups:
         - !Ref ELBSecurityGroup
@@ -165,6 +319,11 @@ Resources:
 
   ELBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W56
+            reason: Using HTTP instead of HTTPS for demo purposes
     Properties:
       LoadBalancerArn: !Ref ElasticLoadBalancer
       Protocol: HTTP
