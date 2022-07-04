@@ -22,12 +22,12 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - lambda.amazonaws.com
+                - !Sub 'lambda.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonEC2FullAccess'
 
   SecurityGroup:
     Type: Custom::SecurityGroup
@@ -35,10 +35,21 @@ Resources:
       ServiceToken: !GetAtt LambdaFunction.Arn
 
   LambdaFunction:
+    #checkov:skip=CKV_AWS_116:Opting to not setup a Dead Letter Queue for demo purposes
+    #checkov:skip=CKV_AWS_117:There is need for VPC connectivity
     Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: IAM Role contains basic permissions to publish logs to CloudWatch
+          - id: W89
+            reason: This Lambda function should not be provisioned within a VPC
     Properties:
+      Architectures: [arm64]
       Description: Creates Security Group
       Handler: index.lambda_handler
+      ReservedConcurrentExecutions: 1
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.9
       Timeout: 300

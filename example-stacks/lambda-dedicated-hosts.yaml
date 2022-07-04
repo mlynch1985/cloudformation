@@ -29,20 +29,24 @@ Parameters:
 Resources:
   LambdaExecutionRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Enabling wildcard on resource to allow for any EC2 Dedicated Host to be managed
     Properties:
       Description: Grants Lambda access to Cloudwatch Logs and to launch dedicated hosts.
-      RoleName: !Sub '${AWS::StackName}-Lambda-Execution-Role'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
               Service:
-                - lambda.amazonaws.com
+                - !Sub 'lambda.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
         - PolicyName: GrantEC2LaunchDedicatedHosts
           PolicyDocument:
@@ -62,10 +66,21 @@ Resources:
       ServiceToken: !GetAtt LambdaFunction.Arn
 
   LambdaFunction:
+    #checkov:skip=CKV_AWS_116:Opting to not setup a Dead Letter Queue for demo purposes
+    #checkov:skip=CKV_AWS_117:There is need for VPC connectivity
     Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: IAM Role contains basic permissions to publish logs to CloudWatch
+          - id: W89
+            reason: This Lambda function should not be provisioned within a VPC
     Properties:
+      Architectures: [arm64]
       Description: !Sub Deploys EC2 dedicated hosts as part of the ${AWS::StackName} Cloudformation stack.
       Handler: index.lambda_handler
+      ReservedConcurrentExecutions: 1
       Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: python3.9
       Timeout: 300
