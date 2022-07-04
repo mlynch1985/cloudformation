@@ -1,374 +1,146 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
-Description: Deploys either a TEST stack containing a single Amazon Linux 2 EC2 instance hosting a Wordpress site and an RDS MySQL instance, or
-  it will deploy a PRODUCTION stack that leverages an AutoScalingGroup and ApplicationLoadBalancer to host a Wordpress environment pointing to an
-  RDS Aurora cluster.
+Description: Deploys a Linux based ASG and an RDS Aurora MySQL Cluster, then configures a Wordpress site
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - PublicSubnets
+          - PrivateSubnets
+          - SourceCidr
+      - Label:
+          default: Linux ASG Configuration
+        Parameters:
+          - AmiId
+          - InstanceType
+          - AsgDesired
+          - AsgMin
+          - AsgMax
 
 Parameters:
-  VPCCidr:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC ID where we should deploy this stack
+  PublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Public facing Subnets for the ELB
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Private facing Subnets for the Linux ASG
+  SourceCidr:
     Type: String
-    Default: 10.0.0.0/16
-    Description: Specify the VPC cidr (max=/16 min=/21)
-    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/([1][6-9]|[2][0-1])"
-    ConstraintDescription: Must be a valid IP cidr range between /16 and /21 and in the 0.0.0.0/0 format
-  LatestAmiId:
+    Description: Provide a CIDR to allow source traffic to the ELB
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Default: 172.31.0.0/16
+  AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Provide the SSM Parameter path to a valid AMI ID
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
-  EnvironmentType:
+  InstanceType:
     Type: String
-    Default: TEST
+    Description: Select the EC2 Instance Size for the Linux ASG Instances
+    Default: t3.small
     AllowedValues:
-      - TEST
-      - PRODUCTION
-    Description: Select an environment type (TEST/PRODUCTION)
-
-Conditions:
-  isTEST: !Equals [!Ref EnvironmentType, 'TEST']
-  isPROD: !Equals [!Ref EnvironmentType, 'PRODUCTION']
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - c5.large
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+      - c5.9xlarge
+  AsgDesired:
+    Type: Number
+    Description: Specify the number of instances to launch by default
+    MinValue: 1
+    MaxValue: 10
+    Default: 3
+  AsgMin:
+    Type: Number
+    Description: Specify the minimum number of instances to launch
+    MinValue: 1
+    MaxValue: 10
+    Default: 1
+  AsgMax:
+    Type: Number
+    Description: Specify the maximum number of instances to launch
+    MinValue: 1
+    MaxValue: 10
+    Default: 6
 
 Mappings:
-  EnvironmentSize:
-    TEST:
-      'EC2': 't3.small'
-      'RDS': 'db.t3.large'
-    PROD:
-      'EC2': 'm5.xlarge'
-      'RDS': 'db.r5.2xlarge'
+  RegionMap:
+    us-east-1:
+      ElbAccountId: 127311923021
+    us-east-2:
+      ElbAccountId: 033677994240
+    us-west-1:
+      ElbAccountId: 027434742980
+    us-west-2:
+      ElbAccountId: 797873946194
+    af-south-1:
+      ElbAccountId: 098369216593
+    ca-central-1:
+      ElbAccountId: 985666609251
+    eu-central-1:
+      ElbAccountId: 054676820928
+    eu-west-1:
+      ElbAccountId: 156460612806
+    eu-west-2:
+      ElbAccountId: 652711504416
+    eu-south-1:
+      ElbAccountId: 635631232127
+    eu-west-3:
+      ElbAccountId: 009996457667
+    eu-north-1:
+      ElbAccountId: 897822967062
+    ap-east-1:
+      ElbAccountId: 754344448648
+    ap-northeast-1:
+      ElbAccountId: 582318560864
+    ap-northeast-2:
+      ElbAccountId: 600734575887
+    ap-northeast-3:
+      ElbAccountId: 383597477331
+    ap-southeast-1:
+      ElbAccountId: 114774131450
+    ap-southeast-2:
+      ElbAccountId: 783225319266
+    ap-southeast-3:
+      ElbAccountId: 589379963580
+    ap-south-1:
+      ElbAccountId: 718504428378
+    me-south-1:
+      ElbAccountId: 076674570225
+    sa-east-1:
+      ElbAccountId: 507241528517
 
 Resources:
-  VPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: !Ref VPCCidr
-      EnableDnsHostnames: true
-      EnableDnsSupport: true
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress'
-
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress'
-
-  VPCGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref VPC
-      InternetGatewayId: !Ref InternetGateway
-
-  PublicSubnetRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-Public'
-
-  PublicSubnetRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PublicSubnetRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-
-  PublicSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      CidrBlock: !Select [0, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
-      MapPublicIpOnLaunch: true
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-Public-A'
-
-  PublicSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [1, !GetAZs '']
-      CidrBlock: !Select [1, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
-      MapPublicIpOnLaunch: true
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-Public-B'
-
-  PublicSubnetC:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [2, !GetAZs '']
-      CidrBlock: !Select [2, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
-      MapPublicIpOnLaunch: true
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-Public-C'
-
-  PublicSubnetARouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnetA
-      RouteTableId: !Ref PublicSubnetRouteTable
-
-  PublicSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnetB
-      RouteTableId: !Ref PublicSubnetRouteTable
-
-  PublicSubnetCRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnetC
-      RouteTableId: !Ref PublicSubnetRouteTable
-
-  PrivateSubnetA:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      CidrBlock: !Select [3, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
-      MapPublicIpOnLaunch: false
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-Private-A'
-
-  PrivateSubnetB:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [1, !GetAZs '']
-      CidrBlock: !Select [4, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
-      MapPublicIpOnLaunch: false
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-Private-B'
-
-  PrivateSubnetC:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: !Select [2, !GetAZs '']
-      CidrBlock: !Select [5, !Cidr [!GetAtt VPC.CidrBlock, 8, 8]]
-      MapPublicIpOnLaunch: false
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-Private-C'
-
-  NATEIPA:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-NGWEIP-A'
-
-  NATEIPB:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-NGWEIP-B'
-
-  NATEIPC:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-NGWEIP-C'
-
-  NATGatewayA:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NATEIPA.AllocationId
-      SubnetId: !Ref PublicSubnetA
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-A'
-
-  NATGatewayB:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NATEIPB.AllocationId
-      SubnetId: !Ref PublicSubnetB
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-B'
-
-  NATGatewayC:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NATEIPC.AllocationId
-      SubnetId: !Ref PublicSubnetC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-C'
-
-  PrivateSubnetARouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Private-A'
-
-  PrivateSubnetBRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Private-B'
-
-  PrivateSubnetCRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Private-C'
-
-  PrivateSubnetARoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateSubnetARouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGatewayA
-
-  PrivateSubnetBRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateSubnetBRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGatewayB
-
-  PrivateSubnetCRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateSubnetCRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NATGatewayC
-
-  PrivateSubnetARouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnetA
-      RouteTableId: !Ref PrivateSubnetARouteTable
-
-  PrivateSubnetBRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnetB
-      RouteTableId: !Ref PrivateSubnetBRouteTable
-
-  PrivateSubnetCRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PrivateSubnetC
-      RouteTableId: !Ref PrivateSubnetCRouteTable
-
-  RdsSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: 'Allows inbound traffic from EC2 instances on TCP:3306 to communicate with RDS instances'
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId: !Ref Ec2SecurityGroup
-      SecurityGroupEgress:
-        - Description: 'Default Outbound'
-          IpProtocol: '-1'
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-RDS'
-
-  Ec2SecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: 'Allows inbound traffic on TCP:80 (HTTP) to communicate with our EC2 instances'
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          SourceSecurityGroupId: !If [isPROD, !Ref ElbSecurityGroup, !Ref 'AWS::NoValue']
-          CidrIp: !If [isTEST, '0.0.0.0/0', !Ref 'AWS::NoValue']
-      SecurityGroupEgress:
-        - Description: 'Default Outbound'
-          IpProtocol: '-1'
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-EC2'
-
-  ElbSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: isPROD
-    Properties:
-      GroupDescription: 'Allows inbound traffic on TCP:80 (HTTP) from everywhere to connect to our ELB'
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: '0.0.0.0/0'
-      SecurityGroupEgress:
-        - Description: 'Default Outbound'
-          IpProtocol: '-1'
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-ELB'
-
-  EfsSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: isPROD
-    Properties:
-      GroupDescription: 'Allows inbound traffic on TCP:2049 (NFS) from our EC2 servers'
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 2049
-          ToPort: 2049
-          SourceSecurityGroupId: !Ref Ec2SecurityGroup
-      SecurityGroupEgress:
-        - Description: 'Default Outbound'
-          IpProtocol: '-1'
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress-EFS'
-
-  IAMRole:
+  IamRole:
     Type: AWS::IAM::Role
     Properties:
+      Description: This role will grant EC2 access to communicate with Systems Manager and CloudWatch
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
               Service:
-                - ec2.amazonaws.com
+                - !Sub 'ec2.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
       Policies:
         - PolicyName: GrantSecretsManager
           PolicyDocument:
@@ -378,12 +150,308 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref RDSSecret
 
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Ref IamRole
+      Roles:
+        - !Ref IamRole
+
+  SecretsManagerKmsKey:
+    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
+    Type: AWS::KMS::Key
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Access is limited using Conditions section
+    Properties:
+      Description: This key will encrypt data stored in Secrets Manager
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable Secrets Manager
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              AWS: '*'
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
+
+  RDSClusterKmsKey:
+    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
+    Type: AWS::KMS::Key
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Access is limited using Conditions section
+    Properties:
+      Description: This key will encrypt data stored in the RDS Cluster
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable RDS Access
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:ListGrants
+              - kms:CreateGrant
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              AWS: '*'
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  - !Sub 'ec2.${AWS::Region}.${AWS::URLSuffix}'
+                  - !Sub 'rds.${AWS::Region}.${AWS::URLSuffix}'
+
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      Description: 'Sample RDS Instance Credentials'
+      GenerateSecretString:
+        ExcludePunctuation: true
+        GenerateStringKey: password
+        PasswordLength: 32
+        RequireEachIncludedType: true
+        SecretStringTemplate: '{"username": "admin"}'
+      KmsKeyId: !Ref SecretsManagerKmsKey
+
+  S3Bucket:
+    #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
+    #checkov:skip=CKV_AWS_21:This is a logging bucket and therefore we do not need Versioning enabled
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: We are opting to not activate access logging for demo purposes
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256 # aws:kms is not currently support as of 2022.07.01
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOlderThan30Days
+            Status: Enabled
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-S3-Wordpress'
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GrantPutObject
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              AWS: !Sub
+                - 'arn:${AWS::Partition}:iam::${CurrentELBAccountId}:root'
+                - CurrentELBAccountId: !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
+          - Sid: GrantGetBucketAcl
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - !Sub '${S3Bucket.Arn}'
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              Service: !Sub 'logdelivery.elb.${AWS::URLSuffix}'
+
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'This group will allow HTTP access to the Elastic Load Balancer from ${SourceCidr}'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Grants inbound HTTP access from external sources
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref SourceCidr
+      SecurityGroupEgress:
+        - Description: Enable outbound website healthchecks
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref SourceCidr
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ELB-ApacheHttpd'
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+    Properties:
+      GroupDescription: This group will allow HTTP access to the EC2 Instances from the Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Grants inbound HTTP access from ELB
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ELBSecurityGroup
+      SecurityGroupEgress:
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-LinuxASG-Wordpress'
+
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: Allowing for EFS instances to communicate outbound for demo purposes
+    Properties:
+      GroupDescription: Allows inbound traffic on TCP:2049 (NFS) from our EC2 servers
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Grants inbound NFS access from our wordpress servers
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-EFS-Wordpress'
+
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: Allowing for RDS instances to communicate outbound for demo purposes
+    Properties:
+      GroupDescription: This group will allow TCP:3306 inbound to our RDS Instances from the wordpress servers
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Grants TCP:3306 inbound access to our RDS Instance
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-RDS-Wordpress'
+
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - S3BucketPolicy
+    Properties:
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value: !Ref S3Bucket
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: true
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets: !Ref PublicSubnets
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-Wordpress'
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckPort: '80'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-399
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: true
+
+  ELBListener:
+    #checkov:skip=CKV_AWS_2:Using HTTP instead of HTTPS for demo purposes
+    #checkov:skip=CKV_AWS_103:TLS v1.2 is not needed since we are using HTTP
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W56
+            reason: Using HTTP instead of HTTPS for demo purposes
+    Properties:
+      LoadBalancerArn: !Ref ElasticLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
   EFSPolicy:
     Type: AWS::IAM::Policy
-    Condition: isPROD
     Properties:
       Roles:
-        - !Ref IAMRole
+        - !Ref IamRole
       PolicyName: GrantEfsAccess
       PolicyDocument:
         Statement:
@@ -395,149 +463,8 @@ Resources:
               - elasticfilesystem:ClientWrite
             Resource: !GetAtt EfsFileSystem.Arn
 
-  EC2InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref IAMRole
-
-  RDSSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      GenerateSecretString:
-        SecretStringTemplate: '{"username": "wordpressadmin"}'
-        GenerateStringKey: 'password'
-        PasswordLength: 36
-        ExcludePunctuation: true
-
-  RDSSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: 'RDS Subnet Group for Wordpress Database'
-      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB, !Ref PrivateSubnetC]
-
-  TestDB:
-    Type: AWS::RDS::DBInstance
-    Condition: isTEST
-    Properties:
-      AllocatedStorage: 20
-      AvailabilityZone: !Select [0, !GetAZs '']
-      BackupRetentionPeriod: 0
-      DeletionProtection: true
-      DBName: 'myWordpressDB'
-      DBSubnetGroupName: !Ref RDSSubnetGroup
-      DBInstanceClass: !FindInMap [EnvironmentSize, TEST, RDS]
-      VPCSecurityGroups: [!Ref RdsSecurityGroup]
-      StorageEncrypted: true
-      PubliclyAccessible: false
-      Engine: mysql
-      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}']]
-      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}']]
-
-  ProdDB:
-    Type: AWS::RDS::DBCluster
-    Condition: isPROD
-    Properties:
-      BackupRetentionPeriod: 10
-      DBSubnetGroupName: !Ref RDSSubnetGroup
-      DatabaseName: 'myWordpressDB'
-      Engine: aurora-mysql
-      EngineMode: serverless
-      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}']]
-      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}']]
-      StorageEncrypted: true
-      VpcSecurityGroupIds: [!Ref RdsSecurityGroup]
-
-  TestEC2:
-    Type: AWS::EC2::Instance
-    Condition: isTEST
-    Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      IamInstanceProfile: !Ref EC2InstanceProfile
-      ImageId: !Ref LatestAmiId
-      InstanceType: !FindInMap [EnvironmentSize, TEST, EC2]
-      SecurityGroupIds: [!Ref Ec2SecurityGroup]
-      SubnetId: !Ref PublicSubnetA
-      Tags:
-        - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-Wordpress'
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
-          yum install httpd mysql jq -y
-          amazon-linux-extras install php7.4
-          yum clean metadata
-          yum install php-gd.x86_64 -y
-          yum install php-mbstring.x86_64 -y
-          yum update -y
-          dbuser=$(aws secretsmanager get-secret-value --secret-id ${RDSSecret} --region ${AWS::Region} --output text --query SecretString | jq -r .username)
-          dbpass=$(aws secretsmanager get-secret-value --secret-id ${RDSSecret} --region ${AWS::Region} --output text --query SecretString | jq -r .password)
-          cd /var/www/html
-          wget https://wordpress.org/latest.tar.gz
-          tar -zxf latest.tar.gz --strip 1 >/dev/null 2>&1
-          rm -f latest.tar.gz
-          cp wp-config-sample.php wp-config.php
-          sed -i "s/database_name_here/myWordpressDB/g" wp-config.php
-          sed -i "s/localhost/${TestDB.Endpoint.Address}/g" wp-config.php
-          sed -i "s/username_here/$dbuser/g" wp-config.php
-          sed -i "s/password_here/$dbpass/g" wp-config.php
-
-          TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` \
-          && PUBLICIP=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/meta-data/public-ipv4`
-
-          sed -i "s#<?php#<?php\ndefine( 'WP_HOME', 'http://$PUBLICIP' );\ndefine( 'WP_SITEURL', 'http://$PUBLICIP' );#g" wp-config.php
-          echo "" >> wp-config.php
-          curl -s 'https://api.wordpress.org/secret-key/1.1/salt/' >> wp-config.php
-          chown -R apache:apache /var/www
-          chmod -R 755 /var/www
-          chkconfig httpd on
-          service httpd start
-
-  ELB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Condition: isPROD
-    Properties:
-      Scheme: internet-facing
-      SecurityGroups: [!Ref ElbSecurityGroup]
-      Subnets:
-        - !Ref PublicSubnetA
-        - !Ref PublicSubnetB
-        - !Ref PublicSubnetC
-
-  TargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Condition: isPROD
-    Properties:
-      VpcId: !Ref VPC
-      Protocol: HTTP
-      Port: 80
-      TargetType: instance
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPath: /
-      HealthCheckPort: 80
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 3
-      UnhealthyThresholdCount: 2
-      TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: true
-
-  ELBListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Condition: isPROD
-    Properties:
-      LoadBalancerArn: !Ref ELB
-      Protocol: HTTP
-      Port: 80
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TargetGroup
-
   EfsFileSystem:
     Type: AWS::EFS::FileSystem
-    Condition: isPROD
     Properties:
       BackupPolicy:
         Status: ENABLED
@@ -546,51 +473,107 @@ Resources:
 
   EfsMountPointA:
     Type: AWS::EFS::MountTarget
-    Condition: isPROD
     Properties:
       FileSystemId: !Ref EfsFileSystem
       SecurityGroups: [!Ref EfsSecurityGroup]
-      SubnetId: !Ref PrivateSubnetA
+      SubnetId: !Select [0, !Ref PrivateSubnets]
 
   EfsMountPointB:
     Type: AWS::EFS::MountTarget
-    Condition: isPROD
     Properties:
       FileSystemId: !Ref EfsFileSystem
       SecurityGroups: [!Ref EfsSecurityGroup]
-      SubnetId: !Ref PrivateSubnetB
+      SubnetId: !Select [1, !Ref PrivateSubnets]
 
   EfsMountPointC:
     Type: AWS::EFS::MountTarget
-    Condition: isPROD
     Properties:
       FileSystemId: !Ref EfsFileSystem
       SecurityGroups: [!Ref EfsSecurityGroup]
-      SubnetId: !Ref PrivateSubnetC
+      SubnetId: !Select [2, !Ref PrivateSubnets]
+
+  DBClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: !Sub '${AWS::StackName} DB Cluster ParameterGroup'
+      Family: aurora-mysql5.7
+      Parameters:
+        character_set_database: utf32
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-wordpress'
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub '${AWS::StackName} DB SubnetGroup'
+      SubnetIds: !Ref PrivateSubnets
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-wordpress'
+
+  RDSSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref RDSSecret
+      TargetId: !Ref RDSCluster
+      TargetType: AWS::RDS::DBCluster
+
+  RDSCluster:
+    #checkov:skip=CKV_AWS_162:IAM Authentication not currently support by Aurora Serverless
+    Type: AWS::RDS::DBCluster
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      BackupRetentionPeriod: 30
+      CopyTagsToSnapshot: true
+      DatabaseName: WordpressDb
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DeletionProtection: false
+      EnableIAMDatabaseAuthentication: false # not currently support by Aurora Serverless
+      Engine: aurora-mysql
+      EngineMode: serverless
+      EngineVersion: 5.7.mysql_aurora.2.10.2
+      KmsKeyId: !Ref RDSClusterKmsKey
+      MasterUsername: !Sub '{{resolve:secretsmanager:${RDSSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSSecret}:SecretString:password}}'
+      ScalingConfiguration:
+        AutoPause: true
+        MaxCapacity: 64
+        MinCapacity: 2
+        SecondsUntilAutoPause: 300
+      StorageEncrypted: true
+      VpcSecurityGroupIds:
+        - !Ref RdsSecurityGroup
 
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
-    Condition: isPROD
     Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
       LaunchTemplateData:
         IamInstanceProfile:
-          Name: !Ref EC2InstanceProfile
-        ImageId: !Ref LatestAmiId
-        InstanceType: !FindInMap [EnvironmentSize, TEST, EC2]
-        SecurityGroupIds: [!Ref Ec2SecurityGroup]
+          Name: !Ref InstanceProfile
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        MetadataOptions:
+          HttpTokens: required
+        SecurityGroupIds:
+          - !Ref EC2SecurityGroup
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm -y
-            yum install amazon-efs-utils -y
+            amazon-linux-extras install -y epel
+            yum install -y amazon-efs-utils
             mkdir -p /var/www/html
             echo "${EfsFileSystem}:/ /var/www/html efs _netdev,tls,iam 0 0" >> /etc/fstab
             mount -a
-            yum install httpd mysql jq -y
-            amazon-linux-extras install php7.4
+            yum install -y httpd mysql jq
+            amazon-linux-extras install -y php8.0
+            amazon-linux-extras install -y httpd_modules
             yum clean metadata
-            yum install php-gd.x86_64 -y
-            yum install php-mbstring.x86_64 -y
+            yum install -y php-gd.x86_64
+            yum install -y php-mbstring.x86_64
             yum update -y
 
             FILE=/var/www/html/wp-config.php
@@ -603,11 +586,12 @@ Resources:
               tar -zxf latest.tar.gz --strip 1
               rm -f latest.tar.gz
               cp wp-config-sample.php wp-config.php
-              sed -i "s/database_name_here/myWordpressDB/g" wp-config.php
-              sed -i "s/localhost/${ProdDB.Endpoint.Address}/g" wp-config.php
+              sed -i "s/database_name_here/WordpressDb/g" wp-config.php
+              sed -i "s/localhost/${RDSCluster.Endpoint.Address}/g" wp-config.php
               sed -i "s/username_here/$dbuser/g" wp-config.php
               sed -i "s/password_here/$dbpass/g" wp-config.php
-              sed -i "s#<?php#<?php\ndefine( 'WP_HOME', 'http://${ELB.DNSName}' );\ndefine( 'WP_SITEURL', 'http://${ELB.DNSName}' );#g" wp-config.php
+              sed -i "s/utf8/utf32/g" wp-config.php
+              sed -i "s#<?php#<?php\ndefine( 'WP_HOME', 'http://${ElasticLoadBalancer.DNSName}' );\ndefine( 'WP_SITEURL', 'http://${ElasticLoadBalancer.DNSName}' );#g" wp-config.php
               echo "" >> wp-config.php
               curl -s 'https://api.wordpress.org/secret-key/1.1/salt/' >> wp-config.php
               chown -R apache:apache /var/www
@@ -619,31 +603,38 @@ Resources:
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
-    Condition: isPROD
     Properties:
-      AvailabilityZones:
-        - !Select [0, !GetAZs '']
-        - !Select [1, !GetAZs '']
-        - !Select [2, !GetAZs '']
-      DesiredCapacity: 3
-      HealthCheckGracePeriod: 300
-      HealthCheckType: EC2
+      HealthCheckGracePeriod: 180
+      HealthCheckType: ELB
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
-      MaxSize: 3
-      MinSize: 3
+      DesiredCapacity: !Ref AsgDesired
+      MinSize: !Ref AsgMin
+      MaxSize: !Ref AsgMax
       TargetGroupARNs:
         - !Ref TargetGroup
-      VPCZoneIdentifier:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-        - !Ref PrivateSubnetC
+      VPCZoneIdentifier: !Ref PrivateSubnets
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-LinuxASG-Wordpress'
+          PropagateAtLaunch: true
+
+  AutoScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 80
 
 Outputs:
   WordpressSiteUrl:
-    Condition: isPROD
-    Value: !GetAtt ELB.DNSName
+    Value: !GetAtt ElasticLoadBalancer.DNSName
     Description: Public facing url of our Wordpress site
-    Export:
-      Name: WordpressSiteUrl
+  RDSEndpointAddress:
+    Value: !GetAtt RDSCluster.Endpoint.Address
+    Description: RDS Cluster Write Endpoint Address

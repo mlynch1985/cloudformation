@@ -28,6 +28,7 @@ Parameters:
 
 Resources:
   LambdaExecutionRole:
+    #checkov:skip=CKV_AWS_111:Allowing writes without constraints only for demo purposes
     Type: AWS::IAM::Role
     Metadata:
       cfn_nag:

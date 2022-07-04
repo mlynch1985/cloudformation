@@ -80,6 +80,8 @@ Resources:
       SourceArn: !GetAtt CloudWatchEventRule.Arn
 
   LambdaFunction:
+    #checkov:skip=CKV_AWS_116:Opting to not setup a Dead Letter Queue for demo purposes
+    #checkov:skip=CKV_AWS_117:There is need for VPC connectivity
     Type: AWS::Lambda::Function
     Metadata:
       cfn_nag:

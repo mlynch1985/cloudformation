@@ -105,6 +105,7 @@ Mappings:
 
 Resources:
   IamExecutionRole:
+    #checkov:skip=CKV_AWS_111:Allowing writes without constraints only for demo purposes
     Type: AWS::IAM::Role
     Metadata:
       cfn_nag:
@@ -162,6 +163,8 @@ Resources:
               Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
 
   S3Bucket:
+    #checkov:skip=CKV_AWS_18:Opting to disable Access Logging for demo purposes
+    #checkov:skip=CKV_AWS_21:Versioning is not required for a logging bucket
     Type: AWS::S3::Bucket
     UpdateReplacePolicy: Retain
     DeletionPolicy: Retain
@@ -283,6 +286,8 @@ Resources:
           Value: true
         - Key: access_logs.s3.bucket
           Value: !Ref S3Bucket
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: true
       Scheme: internet-facing
       SecurityGroups:
         - !Ref ELBSecurityGroup
@@ -305,6 +310,8 @@ Resources:
       UnhealthyThresholdCount: 2
 
   ELBListener:
+    #checkov:skip=CKV_AWS_2:Using HTTP instead of HTTPS for demo purposes
+    #checkov:skip=CKV_AWS_103:TLS v1.2 is not needed since we are using HTTP
     Type: AWS::ElasticLoadBalancingV2::Listener
     Metadata:
       cfn_nag:
