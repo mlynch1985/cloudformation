@@ -122,6 +122,8 @@ Resources:
 
   RDSSecret:
     Type: AWS::SecretsManager::Secret
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
     Properties:
       Description: 'Sample RDS Instance Credentials'
       GenerateSecretString:
@@ -162,6 +164,8 @@ Resources:
   RDSCluster:
     #checkov:skip=CKV_AWS_162:IAM Authentication not currently support by Aurora Serverless
     Type: AWS::RDS::DBCluster
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
     Properties:
       BackupRetentionPeriod: 30
       CopyTagsToSnapshot: true
@@ -173,8 +177,8 @@ Resources:
       EngineMode: serverless
       EngineVersion: 5.7.mysql_aurora.2.10.2
       KmsKeyId: !Ref RDSClusterKmsKey
-      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}']]
-      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}']]
+      MasterUsername: !Sub '{{resolve:secretsmanager:${RDSSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${RDSSecret}:SecretString:password}}'
       ScalingConfiguration:
         AutoPause: true
         MaxCapacity: 64
