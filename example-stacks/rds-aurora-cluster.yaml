@@ -65,7 +65,7 @@ Resources:
             Action: 'kms:*'
             Resource: '*'
             Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
           - Sid: Enable Secrets Manager
             Effect: 'Allow'
             Action:
@@ -79,7 +79,7 @@ Resources:
               AWS: '*'
             Condition:
               StringEquals:
-                kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.amazonaws.com'
+                kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
 
   RDSClusterKmsKey:
     #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
@@ -100,7 +100,7 @@ Resources:
             Action: 'kms:*'
             Resource: '*'
             Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
           - Sid: Enable RDS Access
             Effect: 'Allow'
             Action:
@@ -117,8 +117,8 @@ Resources:
             Condition:
               StringEquals:
                 kms:ViaService:
-                  - !Sub 'ec2.${AWS::Region}.amazonaws.com'
-                  - !Sub 'rds.${AWS::Region}.amazonaws.com'
+                  - !Sub 'ec2.${AWS::Region}.${AWS::URLSuffix}'
+                  - !Sub 'rds.${AWS::Region}.${AWS::URLSuffix}'
 
   RDSSecret:
     Type: AWS::SecretsManager::Secret
@@ -160,6 +160,7 @@ Resources:
       TargetType: AWS::RDS::DBCluster
 
   RDSCluster:
+    #checkov:skip=CKV_AWS_162:IAM Authentication not currently support by Aurora Serverless
     Type: AWS::RDS::DBCluster
     Properties:
       BackupRetentionPeriod: 30
@@ -167,7 +168,7 @@ Resources:
       DBClusterParameterGroupName: !Ref DBClusterParameterGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
       DeletionProtection: false
-      EnableIAMDatabaseAuthentication: true
+      EnableIAMDatabaseAuthentication: false # not currently support by Aurora Serverless
       Engine: aurora-mysql
       EngineMode: serverless
       EngineVersion: 5.7.mysql_aurora.2.10.2

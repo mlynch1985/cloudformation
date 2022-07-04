@@ -30,12 +30,12 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - ec2.amazonaws.com
+                - !Sub 'ec2.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/EC2InstanceProfileForImageBuilder'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -72,7 +72,7 @@ Resources:
       Name: !Sub '${AWS::StackName}-HelloWorld-Recipe'
       Description: This recipe will create an AMI based on AmazonLinux2 AMI and set the root drive to 50GB
       Version: 1.0.0
-      ParentImage: !Sub 'arn:aws:imagebuilder:${AWS::Region}:aws:image/amazon-linux-2-x86/x.x.x'
+      ParentImage: !Sub 'arn:${AWS::Partition}:imagebuilder:${AWS::Region}:aws:image/amazon-linux-2-x86/x.x.x'
       Components:
         - ComponentArn: !Ref Component
       BlockDeviceMappings:
