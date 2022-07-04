@@ -1,0 +1,28 @@
+name: CfnLint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup cfn-lint
+        uses: scottbrenner/cfn-lint-action@v2
+
+      - name: Execute cfn-lint
+        run: |
+          cfn-lint --format pretty example-stacks/*
