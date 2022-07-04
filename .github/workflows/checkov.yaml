@@ -24,7 +24,7 @@ jobs:
         uses: actions/setup-python@v3
 
       - name: Execute Checkov
-        uses: bridgecrewio/checkov-actions@master
+        uses: bridgecrewio/checkov-action@master
         # with:
         #   directory: examples-stacks
         #   framework: cloudformation
