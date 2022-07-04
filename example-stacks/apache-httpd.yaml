@@ -135,12 +135,12 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - ec2.amazonaws.com
+                - !Sub 'ec2.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -194,11 +194,9 @@ Resources:
               - !Sub '${S3Bucket.Arn}'
               - !Sub '${S3Bucket.Arn}/*'
             Principal:
-              AWS: !Join
-                - ''
-                - - 'arn:aws:iam::'
-                  - !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
-                  - ':root'
+              AWS: !Sub
+                - 'aws:${AWS::Partition}:iam::${CurrentELBAccountId}:root'
+                - CurrentELBAccountId: !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
           - Sid: GrantGetBucketAcl
             Effect: Allow
             Action:
@@ -207,7 +205,7 @@ Resources:
               - !Sub '${S3Bucket.Arn}'
               - !Sub '${S3Bucket.Arn}/*'
             Principal:
-              Service: logdelivery.elb.amazonaws.com
+              Service: !Sub 'logdelivery.elb.${AWS::URLSuffix}'
 
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
