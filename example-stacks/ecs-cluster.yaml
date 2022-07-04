@@ -118,7 +118,7 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - ecs-tasks.amazonaws.com
+                - !Sub 'ecs-tasks.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
       Policies:
@@ -148,7 +148,7 @@ Resources:
             Action: 'kms:*'
             Resource: '*'
             Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
           - Sid: Enable CloudWatch Logs
             Effect: 'Allow'
             Action:
@@ -159,7 +159,7 @@ Resources:
               - kms:Describe*
             Resource: '*'
             Principal:
-              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+              Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
 
   S3Bucket:
     Type: AWS::S3::Bucket
@@ -206,11 +206,9 @@ Resources:
               - !Sub '${S3Bucket.Arn}'
               - !Sub '${S3Bucket.Arn}/*'
             Principal:
-              AWS: !Join
-                - ''
-                - - 'arn:aws:iam::'
-                  - !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
-                  - ':root'
+              AWS: !Sub
+                - 'aws:${AWS::Partition}:iam::${CurrentELBAccountId}:root'
+                - CurrentELBAccountId: !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
           - Sid: GrantGetBucketAcl
             Effect: Allow
             Action:
@@ -219,7 +217,7 @@ Resources:
               - !Sub '${S3Bucket.Arn}'
               - !Sub '${S3Bucket.Arn}/*'
             Principal:
-              Service: logdelivery.elb.amazonaws.com
+              Service: !Sub 'logdelivery.elb.${AWS::URLSuffix}'
 
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -323,6 +321,8 @@ Resources:
 
   CloudWatchLogGroup:
     Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
     Properties:
       KmsKeyId: !GetAtt KmsKey.Arn
       LogGroupName: !Sub '${AWS::StackName}-ecs-cluster'
