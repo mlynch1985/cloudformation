@@ -12,7 +12,6 @@ Metadata:
           - InstanceCount
           - InstanceType
           - EBSVolumeSize
-          - EBSVolumeType
 
 Parameters:
   SourceCidr:
@@ -47,17 +46,6 @@ Parameters:
     Description: Specify the size of the EBS volume for each instance
     Default: 30
     MinValue: 30
-  EBSVolumeType:
-    Type: String
-    Description: Select the type of EBS volume for each instance
-    Default: gp2
-    AllowedValues:
-      - gp2
-      # - gp3
-      - io1
-      # - io2
-      # - st1
-      # - sc1
 
 Resources:
   KmsKey:
@@ -73,7 +61,7 @@ Resources:
             Action: 'kms:*'
             Resource: '*'
             Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
       MultiRegion: false
       PendingWindowInDays: 30
       Tags:
@@ -84,6 +72,8 @@ Resources:
     Type: AWS::OpenSearchService::Domain
     UpdatePolicy:
       EnableVersionUpgrade: true
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
     Properties:
       AccessPolicies:
         Version: '2012-10-17'
@@ -92,7 +82,7 @@ Resources:
             Principal:
               AWS: '*'
             Action: 'es:*'
-            Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/*'
+            Resource: !Sub 'arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/*'
             Condition:
               IpAddress:
                 aws:SourceIp: !Ref SourceCidr
@@ -110,7 +100,7 @@ Resources:
       EBSOptions:
         EBSEnabled: true
         VolumeSize: !Ref EBSVolumeSize
-        VolumeType: !Ref EBSVolumeType
+        VolumeType: gp2
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-open-search'
