@@ -49,6 +49,38 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}'
 
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub 'Encrypts data within our ${AWS::StackName} VPC Flow Logs S3 Bucket'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable VPC Flow Logs
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+              - kms:CreateGrant
+            Resource: '*'
+            Principal:
+              Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
+      MultiRegion: false
+      PendingWindowInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-vpc-flow-logs'
+
   S3Bucket:
     #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
     #checkov:skip=CKV_AWS_21:This is a logging bucket and therefore we do not need Versioning enabled
@@ -68,7 +100,8 @@ Resources:
         ServerSideEncryptionConfiguration:
           - BucketKeyEnabled: true
             ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256 # aws:kms is not currently support as of 2022.07.01
+              KMSMasterKeyID: !Ref KmsKey
+              SSEAlgorithm: aws:kms
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOlderThan30Days
