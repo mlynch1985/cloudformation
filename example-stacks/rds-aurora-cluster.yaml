@@ -47,6 +47,7 @@ Resources:
           Value: !Sub '${AWS::StackName}-rds-cluster'
 
   SecretsManagerKmsKey:
+    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
     Type: AWS::KMS::Key
     Metadata:
       cfn_nag:
@@ -81,6 +82,7 @@ Resources:
                 kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.amazonaws.com'
 
   RDSClusterKmsKey:
+    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
     Type: AWS::KMS::Key
     Metadata:
       cfn_nag:
@@ -165,6 +167,7 @@ Resources:
       DBClusterParameterGroupName: !Ref DBClusterParameterGroup
       DBSubnetGroupName: !Ref DBSubnetGroup
       DeletionProtection: false
+      EnableIAMDatabaseAuthentication: true
       Engine: aurora-mysql
       EngineMode: serverless
       EngineVersion: 5.7.mysql_aurora.2.10.2
