@@ -465,6 +465,8 @@ Resources:
 
   EfsFileSystem:
     Type: AWS::EFS::FileSystem
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
     Properties:
       BackupPolicy:
         Status: ENABLED
