@@ -83,37 +83,6 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-S3-vpc-flowlogs'
 
-  # S3BucketPolicy:
-  #   Type: AWS::S3::BucketPolicy
-  #   Properties:
-  #     Bucket: !Ref S3Bucket
-  #     PolicyDocument:
-  #       Version: '2012-10-17'
-  #       Statement:
-  #         - Sid: AWSLogDeliveryWrite
-  #           Effect: Allow
-  #           Action: s3:PutObject
-  #           Resource: !Sub '${S3Bucket.Arn}'
-  #           Principal:
-  #             Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
-  #           Condition:
-  #             StringEquals:
-  #               - s3:x-amz-acl: bucket-owner-full-control
-  #               - aws:SourceAccount: !Ref AWS::AccountId
-  #         - Sid: AWSLogDeliveryCheck
-  #           Effect: Allow
-  #           Action:
-  #             - s3:GetBucketAcl
-  #             - s3:ListBucket
-  #           Resource: !Sub '${S3Bucket}'
-  #           Principal:
-  #             Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
-  #           Condition:
-  #             - StringEquals:
-  #                 aws:SourceAccount: !Ref AWS::AccountId
-  #             - ArnLike:
-  #                 aws:SourceArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*'
-
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
