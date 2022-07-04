@@ -25,11 +25,11 @@ Resources:
           - Effect: Allow
             Principal:
               Service:
-                - lambda.amazonaws.com
+                - !Sub 'lambda.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
         - PolicyName: GrantCloudWatchAlarms
           PolicyDocument:
@@ -76,7 +76,7 @@ Resources:
     Properties:
       FunctionName: !Ref LambdaFunction
       Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
+      Principal: !Sub 'events.${AWS::URLSuffix}'
       SourceArn: !GetAtt CloudWatchEventRule.Arn
 
   LambdaFunction:
@@ -84,6 +84,8 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
+          - id: W58
+            reason: IAM Role contains basic permissions to publish logs to CloudWatch
           - id: W89
             reason: This Lambda function should not be provisioned within a VPC
     Properties:
