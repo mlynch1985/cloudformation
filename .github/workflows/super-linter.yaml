@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Super-Linter
-        uses: github/super-linter@v4
+        uses: github/super-linter/slim@v4
         env:
           # VALIDATE_ALL_CODEBASE: false # set to false if you only want to check new or modified files
           DEFAULT_BRANCH: main
