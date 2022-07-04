@@ -1,71 +1,154 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
-Description: This template will deploy a sample RDS Auora Serverless instance with Multi-AZ enabled.
+Description: This template will deploy a sample RDS Auora Serverless cluster with Multi-AZ enabled.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - VpcCidr
+          - Subnets
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC ID where we should deploy this stack
+  VpcCidr:
+    Type: String
+    Description: Provide a CIDR to allow source traffic to the RDS Instaces
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Default: 172.31.0.0/16
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Public facing Subnets for the ELB
 
 Resources:
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: Allowing for RDS instances to communicate outbound for demo purposes
     Properties:
-      GroupName: !Sub '${AWS::StackName}-RDS-SecurityGroup'
-      GroupDescription: 'This group will allow TCP:3306 inbound to our RDS Instances'
-      VpcId: !ImportValue VPCID
+      GroupDescription: This group will allow TCP:3306 inbound to our RDS Instances from the local vpc
+      VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - Description: 'Grants TCP:3306 inbound access to our RDS Instance'
+        - Description: Grants TCP:3306 inbound access to our RDS Instance
           IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
-          CidrIp: !ImportValue VPCCidr
+          CidrIp: !Ref VpcCidr
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-ECS-ContainerSecurityGroup'
+          Value: !Sub '${AWS::StackName}-rds-cluster'
 
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
+  SecretsManagerKmsKey:
+    Type: AWS::KMS::Key
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Access is limited using Conditions section
     Properties:
-      DBSubnetGroupName: !Sub '${AWS::StackName}-rds-subnetgroup'
-      DBSubnetGroupDescription: 'RDS Subnet Group for Sample Database'
-      SubnetIds:
-        - !ImportValue PrivateSubnetA
-        - !ImportValue PrivateSubnetB
-        - !ImportValue PrivateSubnetC
-      Tags:
-        - Key: Name
-          Value: !Sub '${AWS::StackName}-rds-subnetgroup'
+      Description: This key will encrypt data stored in Secrets Manager
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          - Sid: Enable Secrets Manager
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              AWS: '*'
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.amazonaws.com'
+
+  RDSClusterKmsKey:
+    Type: AWS::KMS::Key
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Access is limited using Conditions section
+    Properties:
+      Description: This key will encrypt data stored in the RDS Cluster
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          - Sid: Enable RDS Access
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:ListGrants
+              - kms:CreateGrant
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              AWS: '*'
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  - !Sub 'ec2.${AWS::Region}.amazonaws.com'
+                  - !Sub 'rds.${AWS::Region}.amazonaws.com'
 
   RDSSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub '${AWS::StackName}-RDS-SampleCredentials'
       Description: 'Sample RDS Instance Credentials'
       GenerateSecretString:
-        SecretStringTemplate: '{"username": "sampleuser"}'
-        GenerateStringKey: 'password'
-        PasswordLength: 24
-        ExcludeCharacters: '"@/\'
+        ExcludeCharacters: '"@/\`;:(){}[]-_~*'
+        GenerateStringKey: password
+        PasswordLength: 32
+        RequireEachIncludedType: true
+        SecretStringTemplate: '{"username": "admin"}'
+      KmsKeyId: !Ref SecretsManagerKmsKey
 
-  RDSCluster:
-    Type: AWS::RDS::DBCluster
+  DBClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
     Properties:
-      AvailabilityZones:
-        - !Select [0, !GetAZs '']
-        - !Select [1, !GetAZs '']
-        - !Select [2, !GetAZs '']
-      BackupRetentionPeriod: 1 # days
-      DatabaseName: 'RDSSampleDatabase'
-      DBClusterIdentifier: !Sub '${AWS::StackName}-Sample-Cluster'
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      VpcSecurityGroupIds:
-        - !Ref SecurityGroup
-      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}']]
-      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}']]
-      Engine: aurora
-      EngineVersion: 5.6.10a
-      EngineMode: serverless
-      ScalingConfiguration:
-        AutoPause: true
-        MinCapacity: 2
-        MaxCapacity: 32
-        SecondsUntilAutoPause: 3600
+      Description: !Sub '${AWS::StackName} DB Cluster ParameterGroup'
+      Family: aurora-mysql5.7
+      Parameters:
+        character_set_database: utf32
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-parametergroup'
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub '${AWS::StackName} DB SubnetGroup'
+      SubnetIds: !Ref Subnets
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-rds-subnetgroup'
 
   RDSSecretAttachment:
     Type: AWS::SecretsManager::SecretTargetAttachment
@@ -73,6 +156,29 @@ Resources:
       SecretId: !Ref RDSSecret
       TargetId: !Ref RDSCluster
       TargetType: AWS::RDS::DBCluster
+
+  RDSCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      BackupRetentionPeriod: 30
+      CopyTagsToSnapshot: true
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DeletionProtection: false
+      Engine: aurora-mysql
+      EngineMode: serverless
+      EngineVersion: 5.7.mysql_aurora.2.10.2
+      KmsKeyId: !Ref RDSClusterKmsKey
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:username}}']]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}']]
+      ScalingConfiguration:
+        AutoPause: true
+        MaxCapacity: 64
+        MinCapacity: 2
+        SecondsUntilAutoPause: 300
+      StorageEncrypted: true
+      VpcSecurityGroupIds:
+        - !Ref SecurityGroup
 
 Outputs:
   RDSEndpointAddress:
