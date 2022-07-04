@@ -192,5 +192,3 @@ Outputs:
   RDSEndpointAddress:
     Value: !GetAtt RDSCluster.Endpoint.Address
     Description: RDS Cluster Write Endpoint Address
-    Export:
-      Name: RDSEndpointAddress
