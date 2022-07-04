@@ -36,6 +36,84 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}'
 
+  VpcFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      LogDestination: !GetAtt S3Bucket.Arn
+      LogDestinationType: s3
+      MaxAggregationInterval: 60
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}'
+
+  S3Bucket:
+    #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
+    #checkov:skip=CKV_AWS_21:This is a logging bucket and therefore we do not need Versioning enabled
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: We are opting to not activate access logging for demo purposes
+          - id: W51
+            reason: We don't want to replace the bucket policy automatically created by the vpc flow logs
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256 # aws:kms is not currently support as of 2022.07.01
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOlderThan30Days
+            Status: Enabled
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-S3-vpc-flowlogs'
+
+  # S3BucketPolicy:
+  #   Type: AWS::S3::BucketPolicy
+  #   Properties:
+  #     Bucket: !Ref S3Bucket
+  #     PolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #         - Sid: AWSLogDeliveryWrite
+  #           Effect: Allow
+  #           Action: s3:PutObject
+  #           Resource: !Sub '${S3Bucket.Arn}'
+  #           Principal:
+  #             Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
+  #           Condition:
+  #             StringEquals:
+  #               - s3:x-amz-acl: bucket-owner-full-control
+  #               - aws:SourceAccount: !Ref AWS::AccountId
+  #         - Sid: AWSLogDeliveryCheck
+  #           Effect: Allow
+  #           Action:
+  #             - s3:GetBucketAcl
+  #             - s3:ListBucket
+  #           Resource: !Sub '${S3Bucket}'
+  #           Principal:
+  #             Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
+  #           Condition:
+  #             - StringEquals:
+  #                 aws:SourceAccount: !Ref AWS::AccountId
+  #             - ArnLike:
+  #                 aws:SourceArn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*'
+
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -66,6 +144,11 @@ Resources:
 
   PublicSubnetA:
     Type: AWS::EC2::Subnet
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: These are intentionally made public subnets
     Properties:
       AvailabilityZone: !Select [0, !GetAZs '']
       CidrBlock: !Select [0, !Cidr [!GetAtt VPC.CidrBlock, 8, !Ref SubnetMask]]
@@ -77,6 +160,11 @@ Resources:
 
   PublicSubnetB:
     Type: AWS::EC2::Subnet
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: These are intentionally made public subnets
     Properties:
       AvailabilityZone: !Select [1, !GetAZs '']
       CidrBlock: !Select [1, !Cidr [!GetAtt VPC.CidrBlock, 8, !Ref SubnetMask]]
@@ -88,6 +176,11 @@ Resources:
 
   PublicSubnetC:
     Type: AWS::EC2::Subnet
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: These are intentionally made public subnets
     Properties:
       AvailabilityZone: !Select [2, !GetAZs '']
       CidrBlock: !Select [2, !Cidr [!GetAtt VPC.CidrBlock, 8, !Ref SubnetMask]]
