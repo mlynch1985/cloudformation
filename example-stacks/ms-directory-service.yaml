@@ -53,6 +53,8 @@ Resources:
 
   MSADSecret:
     Type: AWS::SecretsManager::Secret
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
     Properties:
       KmsKeyId: !GetAtt KmsKey.Arn
       Name: !Sub '${AWS::StackName}-MSAD-RootCredentials'
