@@ -37,7 +37,7 @@ Resources:
             Action: 'kms:*'
             Resource: '*'
             Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
           - Sid: Enable CloudWatch Logs
             Effect: 'Allow'
             Action:
@@ -49,7 +49,7 @@ Resources:
               - kms:CreateGrant
             Resource: '*'
             Principal:
-              Service: !Sub 'secretsmanager.${AWS::Region}.amazonaws.com'
+              Service: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
 
   MSADSecret:
     Type: AWS::SecretsManager::Secret
@@ -67,7 +67,7 @@ Resources:
       Edition: Enterprise
       EnableSso: false
       Name: corp.example.com
-      Password: !Join ['', ['{{resolve:secretsmanager:', !Ref MSADSecret, ':SecretString}}']]
+      Password: !Sub '{{resolve:secretsmanager:${MSADSecret}:SecretString}}'
       ShortName: CORP
       VpcSettings:
         VpcId: !Ref VpcId
