@@ -25,6 +25,6 @@ jobs:
           fetch-depth: 0
 
       - name: Execute CFN-NAG
-        uses: stelligent/cfn-nag-sarif-action@@master
+        uses: stelligent/cfn-nag-sarif-action@master
         with:
           input_path: example-stacks
