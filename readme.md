@@ -1,7 +1,7 @@
 Mike Lynch's CloudFormation Projects
 =====
 
-![GitHub Super-Linter](https://github.com/mlynch1985/cloudformation/workflows/SuperLinter/badge.svg?branch=main)
+![GitHub SuperLinter](https://github.com/mlynch1985/cloudformation/workflows/SuperLinter/badge.svg?branch=main)
 ![GitHub Checkov](https://github.com/mlynch1985/cloudformation/workflows/Checkov/badge.svg?branch=main)
 
 ## Description
