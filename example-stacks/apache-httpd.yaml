@@ -179,7 +179,7 @@ Resources:
         RestrictPublicBuckets: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-S3-ApacheHttpd'
+          Value: !Sub '${AWS::StackName}-AccessLogs'
 
   S3BucketPolicy:
     Type: AWS::S3::BucketPolicy
