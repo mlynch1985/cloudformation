@@ -104,7 +104,7 @@ Mappings:
       ElbAccountId: 507241528517
 
 Resources:
-  IamExecutionRole:
+  IamRole:
     #checkov:skip=CKV_AWS_111:Allowing writes without constraints only for demo purposes
     Type: AWS::IAM::Role
     Metadata:
@@ -122,31 +122,65 @@ Resources:
                 - !Sub 'ecs-tasks.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
-      Policies:
-        - PolicyName: ECSTaskExecutionRolePolicy
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'ecr:GetAuthorizationToken'
-                  - 'ecr:BatchCheckLayerAvailability'
-                  - 'ecr:GetDownloadUrlForLayer'
-                  - 'ecr:BatchGetImage'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource: '*'
+
+  # ECRIamRolePolicy:
+  #   Type: AWS::IAM::Policy
+  #   Properties:
+  #     PolicyName: GrantECRAccess
+  #     Roles:
+  #       - !Ref IamRole
+  #     PolicyDocument:
+  #       Statement:
+  #         - Effect: Allow
+  #           Action:
+  #             - 'ecr:GetAuthorizationToken'
+  #             - 'ecr:BatchCheckLayerAvailability'
+  #             - 'ecr:GetDownloadUrlForLayer'
+  #             - 'ecr:BatchGetImage'
+  #           Resource: '*'
+
+  CloudWatchIamRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GrantCloudWatchLogsAccess
+      Roles:
+        - !Ref IamRole
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+            Resource:
+              - !GetAtt LogGroup.Arn
+              - !Sub '${LogGroup.Arn}*'
 
   KmsKey:
     Type: AWS::KMS::Key
     Properties:
       Description: This key will encrypt data stored in CloudWatch Logs
       EnableKeyRotation: true
+      PendingWindowInDays: 7
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
           - Sid: Enable IAM Policies
             Effect: 'Allow'
-            Action: 'kms:*'
+            Action:
+              - "kms:Create*"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
             Resource: '*'
             Principal:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
@@ -161,6 +195,9 @@ Resources:
             Resource: '*'
             Principal:
               Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   S3Bucket:
     #checkov:skip=CKV_AWS_18:Opting to disable Access Logging for demo purposes
@@ -192,7 +229,7 @@ Resources:
         RestrictPublicBuckets: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-S3-ECSCluster'
+          Value: !Sub '${AWS::StackName}-AccessLogs'
 
   S3BucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -206,21 +243,22 @@ Resources:
             Action:
               - s3:PutObject
             Resource:
-              - !Sub '${S3Bucket.Arn}'
               - !Sub '${S3Bucket.Arn}/*'
             Principal:
               AWS: !Sub
-                - 'aws:${AWS::Partition}:iam::${CurrentELBAccountId}:root'
+                - 'arn:${AWS::Partition}:iam::${CurrentELBAccountId}:root'
                 - CurrentELBAccountId: !FindInMap [RegionMap, !Ref 'AWS::Region', ElbAccountId]
           - Sid: GrantGetBucketAcl
             Effect: Allow
             Action:
               - s3:GetBucketAcl
             Resource:
-              - !Sub '${S3Bucket.Arn}'
-              - !Sub '${S3Bucket.Arn}/*'
+              - !GetAtt S3Bucket.Arn
             Principal:
               Service: !Sub 'logdelivery.elb.${AWS::URLSuffix}'
+            Condition:
+              ArnLike:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -326,7 +364,7 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
 
-  CloudWatchLogGroup:
+  LogGroup:
     Type: AWS::Logs::LogGroup
     UpdateReplacePolicy: Retain
     DeletionPolicy: Retain
@@ -351,7 +389,7 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      ExecutionRoleArn: !GetAtt IamExecutionRole.Arn
+      ExecutionRoleArn: !GetAtt IamRole.Arn
       ContainerDefinitions:
         - Name: !Sub '${AWS::StackName}-ecs-cluster'
           Image: amazon/amazon-ecs-sample
@@ -362,7 +400,7 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-region: !Ref AWS::Region
-              awslogs-group: !Ref CloudWatchLogGroup
+              awslogs-group: !Ref LogGroup
               awslogs-stream-prefix: 'ecs-sample'
 
   ECSService:
