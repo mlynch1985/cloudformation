@@ -27,5 +27,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IGNORE_GITIGNORED_FILES: true
           # VALIDATE_ALL_CODEBASE: false # set to false if you only want to check new or modified files
-          VALIDATE_CLOUDFORMATION: true
+          # VALIDATE_CLOUDFORMATION: true
           FILTER_REGEX_INCLUDE: .*example-stacks/.*
