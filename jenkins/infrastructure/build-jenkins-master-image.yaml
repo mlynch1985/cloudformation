@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Creates pipeline to create Jenkins master Docker image and saves it in ECR Repository
+
+Resources:
+  IamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: This role grants AWS CodeBuild access to the ECR Repo
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub 'codebuild.${AWS::URLSuffix}'
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: GrantECRAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:BatchGetImage'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:CompleteLayerUpload'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:InitiateLayerUpload'
+                  - 'ecr:PutImage'
+                  - 'ecr:UploadLayerPart'
+                Resource:
+                  - !GetAtt ECR.Arn
+                  - !Sub '${ECR.Arn}*'
+
+  KmsKey:
+    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
+    Type: AWS::KMS::Key
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Access is limited using Conditions section
+    Properties:
+      Description: This key will encrypt data stored in Secrets Manager
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action: 'kms:*'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable CodeBuild Access
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              Service:
+                - !Sub 'codebuild.${AWS::URLSuffix}'
+          - Sid: Enable ECR Access
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal: '*'
+            Condition:
+              StringEquals:
+                aws:ViaService: !Sub 'ecr.${AWS::Region}.${AWS::URLSuffix}'
+
+  ECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      EncryptionConfiguration:
+        EncryptionType: KMS # AES256
+        KmsKey: !Ref KmsKey
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: MUTABLE # IMMUTABLE
+      RepositoryPolicyText:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCodeBuild
+            Effect: Allow
+            Action:
+              - 'ecr:BatchGetImage'
+              - 'ecr:BatchCheckLayerAvailability'
+              - 'ecr:CompleteLayerUpload'
+              - 'ecr:GetDownloadUrlForLayer'
+              - 'ecr:InitiateLayerUpload'
+              - 'ecr:PutImage'
+              - 'ecr:UploadLayerPart'
+            Principal: '*'
+
+https://docs.aws.amazon.com/codebuild/latest/userguide/sample-docker.html
