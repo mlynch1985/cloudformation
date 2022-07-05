@@ -193,7 +193,6 @@ Resources:
             Action:
               - s3:PutObject
             Resource:
-              - !Sub '${S3Bucket.Arn}'
               - !Sub '${S3Bucket.Arn}/*'
             Principal:
               AWS: !Sub
@@ -204,10 +203,12 @@ Resources:
             Action:
               - s3:GetBucketAcl
             Resource:
-              - !Sub '${S3Bucket.Arn}'
-              - !Sub '${S3Bucket.Arn}/*'
+              - !GetAtt S3Bucket.Arn
             Principal:
               Service: !Sub 'logdelivery.elb.${AWS::URLSuffix}'
+            Condition:
+              ArnLike:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
