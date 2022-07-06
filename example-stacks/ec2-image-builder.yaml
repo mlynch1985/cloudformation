@@ -14,7 +14,7 @@ Metadata:
 Parameters:
   SecurityGroups:
     Type: List<AWS::EC2::SecurityGroup::Id>
-    Description: Select the Security Groups to attach to the ubild and test instances
+    Description: Select the Security Groups to attach to the build and test instances
   Subnet:
     Type: AWS::EC2::Subnet::Id
     Description: Select the subnet to launch the build and test instances into

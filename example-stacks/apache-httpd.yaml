@@ -40,6 +40,11 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Description: Provide the SSM Parameter path to a valid AMI ID
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    AllowedValues:
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-arm64-gp2
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-minimal-hvm-arm64-ebs
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-minimal-hvm-x86_64-ebs
   InstanceType:
     Type: String
     Description: Select the EC2 Instance Size for the Linux ASG Instances

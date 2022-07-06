@@ -5,10 +5,16 @@ Description: Deploys EC2 Dedicated Hosts with custom options and allows for the 
 Parameters:
   AvailabilityZone:
     Type: AWS::EC2::AvailabilityZone::Name
-    Description: Specify the availability zone to deploy dedicated host into.
+    Description: Specify the availability zone to deploy dedicated host into
   InstanceFamily:
     Type: String
     Description: 'Provide a valid dedicated host instance family. Reference: https://aws.amazon.com/ec2/dedicated-hosts/pricing/#host-configuration'
+    Default: m5
+    AllowedValues:
+      - t3
+      - m5
+      - c5
+      - r5
   InstanceCount:
     Type: Number
     Description: Specify how many dedicated hosts you want to launch.

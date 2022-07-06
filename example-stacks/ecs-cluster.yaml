@@ -149,6 +149,7 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
+              - 'logs:CreateLogGroup'
               - 'logs:CreateLogStream'
               - 'logs:PutLogEvents'
             Resource:
@@ -160,6 +161,7 @@ Resources:
     Properties:
       Description: This key will encrypt data stored in CloudWatch Logs
       EnableKeyRotation: true
+      MultiRegion: false
       PendingWindowInDays: 7
       KeyPolicy:
         Version: '2012-10-17'
@@ -167,20 +169,20 @@ Resources:
           - Sid: Enable IAM Policies
             Effect: 'Allow'
             Action:
-              - "kms:Create*"
-              - "kms:Describe*"
-              - "kms:Enable*"
-              - "kms:List*"
-              - "kms:Put*"
-              - "kms:Update*"
-              - "kms:Revoke*"
-              - "kms:Disable*"
-              - "kms:Get*"
-              - "kms:Delete*"
-              - "kms:TagResource"
-              - "kms:UntagResource"
-              - "kms:ScheduleKeyDeletion"
-              - "kms:CancelKeyDeletion"
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
             Resource: '*'
             Principal:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
@@ -366,20 +368,16 @@ Resources:
 
   LogGroup:
     Type: AWS::Logs::LogGroup
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
     Properties:
       KmsKeyId: !GetAtt KmsKey.Arn
-      LogGroupName: !Sub '${AWS::StackName}-ecs-cluster'
       RetentionInDays: 30
 
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub '${AWS::StackName}-ecs-cluster'
-      ClusterSettings:
-        - Name: containerInsights
-          Value: enabled
 
   ECSTask:
     Type: AWS::ECS::TaskDefinition
@@ -431,5 +429,3 @@ Outputs:
   DemoSiteUrl:
     Value: !GetAtt ElasticLoadBalancer.DNSName
     Description: Public facing url of our sample website
-    Export:
-      Name: DemoSiteUrl

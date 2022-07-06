@@ -25,16 +25,38 @@ Parameters:
 
 Resources:
   KmsKey:
+    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
     Type: AWS::KMS::Key
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Access is limited using Conditions section
     Properties:
       Description: This key will encrypt data stored in Secrets Manager
       EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
           - Sid: Enable IAM Policies
             Effect: 'Allow'
-            Action: 'kms:*'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
             Resource: '*'
             Principal:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
@@ -49,7 +71,11 @@ Resources:
               - kms:CreateGrant
             Resource: '*'
             Principal:
-              Service: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
+              AWS: '*'
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
+                kms:CallerAccount: !Ref AWS::AccountId
 
   MSADSecret:
     Type: AWS::SecretsManager::Secret
@@ -81,11 +107,7 @@ Outputs:
   MSADId:
     Value: !Ref MicrosoftAD
     Description: The Logical ID of the Microsoft Active Directory Resource
-    Export:
-      Name: MSADId
 
   DNSServers:
     Value: !Join [', ', !GetAtt MicrosoftAD.DnsIpAddresses]
     Description: The associated DNS Server IP addresses for our Microsoft Active Directory Resource
-    Export:
-      Name: DNSServers

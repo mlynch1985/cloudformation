@@ -28,9 +28,18 @@ Resources:
                 - !Sub 'lambda.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
+        - PolicyName: GrantCloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-auto-cw-alarms*'
         - PolicyName: GrantCloudWatchAlarms
           PolicyDocument:
             Version: '2012-10-17'
@@ -40,8 +49,69 @@ Resources:
                   - CloudWatch:DescribeAlarms
                   - CloudWatch:PutMetricAlarm
                   - CloudWatch:DeleteAlarms
+                Resource: '*'
+        - PolicyName: GrantEC2DescribeInstances
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
                   - ec2:DescribeInstances
                 Resource: '*'
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in CloudWatch Logs
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable CloudWatch Logs
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
+            Condition:
+              ArnEquals:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-auto-cw-alarms'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      KmsKeyId: !GetAtt KmsKey.Arn
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-auto-cw-alarms'
+      RetentionInDays: 30
 
   CloudWatchEventRule:
     Type: AWS::Events::Rule

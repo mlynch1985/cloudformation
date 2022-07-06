@@ -40,6 +40,11 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Description: Provide the SSM Parameter path to a valid AMI ID
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    AllowedValues:
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-arm64-gp2
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-minimal-hvm-arm64-ebs
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-minimal-hvm-x86_64-ebs
   InstanceType:
     Type: String
     Description: Select the EC2 Instance Size for the Linux ASG Instances
@@ -168,12 +173,28 @@ Resources:
     Properties:
       Description: This key will encrypt data stored in Secrets Manager
       EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
           - Sid: Enable IAM Policies
             Effect: 'Allow'
-            Action: 'kms:*'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
             Resource: '*'
             Principal:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
@@ -191,6 +212,7 @@ Resources:
             Condition:
               StringEquals:
                 kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
+                kms:CallerAccount: !Ref AWS::AccountId
 
   RDSClusterKmsKey:
     #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
@@ -203,12 +225,28 @@ Resources:
     Properties:
       Description: This key will encrypt data stored in the RDS Cluster
       EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
       KeyPolicy:
         Version: '2012-10-17'
         Statement:
           - Sid: Enable IAM Policies
             Effect: 'Allow'
-            Action: 'kms:*'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
             Resource: '*'
             Principal:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
@@ -230,6 +268,7 @@ Resources:
                 kms:ViaService:
                   - !Sub 'ec2.${AWS::Region}.${AWS::URLSuffix}'
                   - !Sub 'rds.${AWS::Region}.${AWS::URLSuffix}'
+                aws:SourceAccount: !Ref AWS::AccountId
 
   RDSSecret:
     Type: AWS::SecretsManager::Secret
