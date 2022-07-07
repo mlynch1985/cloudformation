@@ -27,13 +27,14 @@ Resources:
               Service:
                 - !Sub 'lambda.${AWS::URLSuffix}'
             Action:
-              - sts:AssumeRole
+              - 'sts:AssumeRole'
       Policies:
         - PolicyName: GrantCloudWatchLogs
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
+              - Sid: GrantCloudWatchLogs
+                Effect: Allow
                 Action:
                   - 'logs:CreateLogGroup'
                   - 'logs:CreateLogStream'
@@ -44,19 +45,21 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
+              - Sid: GrantCloudWatchAlarms
+                Effect: Allow
                 Action:
-                  - CloudWatch:DescribeAlarms
-                  - CloudWatch:PutMetricAlarm
-                  - CloudWatch:DeleteAlarms
+                  - 'cloudwatch:DescribeAlarms'
+                  - 'cloudwatch:PutMetricAlarm'
+                  - 'cloudwatch:DeleteAlarms'
                 Resource: '*'
         - PolicyName: GrantEC2DescribeInstances
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
+              - Sid: GrantEC2DescribeInstances
+                Effect: Allow
                 Action:
-                  - ec2:DescribeInstances
+                  - 'ec2:DescribeInstances'
                 Resource: '*'
 
   KmsKey:
@@ -153,6 +156,8 @@ Resources:
     #checkov:skip=CKV_AWS_116:Opting to not setup a Dead Letter Queue for demo purposes
     #checkov:skip=CKV_AWS_117:There is need for VPC connectivity
     Type: AWS::Lambda::Function
+    DependsOn:
+      - LogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -163,7 +168,7 @@ Resources:
     Properties:
       Architectures: [arm64]
       Description: This function will create/delete CloudWatch Alarms when an EC2 instance is launched or terminated for a specified AutoScalingGroup
-      FunctionName: !Sub ${AWS::StackName}-auto-cw-alarms
+      FunctionName: !Sub '${AWS::StackName}-auto-cw-alarms'
       Handler: index.lambda_handler
       ReservedConcurrentExecutions: 5
       Role: !GetAtt LambdaExecutionRole.Arn

@@ -32,7 +32,7 @@ Resources:
               Service:
                 - !Sub 'ec2.${AWS::URLSuffix}'
             Action:
-              - sts:AssumeRole
+              - 'sts:AssumeRole'
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/EC2InstanceProfileForImageBuilder'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
@@ -40,9 +40,162 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Sub '${AWS::StackName}-ec2-imagebuilder'
       Roles:
         - !Ref IamRole
+
+  LogGroupKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in CloudWatch Logs
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable CloudWatch Logs
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
+            Condition:
+              ArnEquals:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/imagebuilder/${AWS::StackName}-HelloWorld-Recipe'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      KmsKeyId: !GetAtt LogGroupKmsKey.Arn
+      LogGroupName: !Sub '/aws/imagebuilder/${AWS::StackName}-HelloWorld-Recipe'
+      RetentionInDays: 30
+
+  S3KmsKey:
+    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
+    Type: AWS::KMS::Key
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F76
+            reason: Access is limited using Conditions section
+    Properties:
+      Description: This key will encrypt data stored in a S3 Bucket
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable EC2 ImageBuilder
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+              - kms:CreateGrant
+            Resource: '*'
+            Principal:
+              AWS: !GetAtt IamRole.Arn
+
+  S3Bucket:
+    #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
+    #checkov:skip=CKV_AWS_21:This is a logging bucket and therefore we do not need Versioning enabled
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: We are opting to not activate access logging for demo purposes
+          - id: W51
+            reason: We don't want to replace the bucket policy automatically created by the vpc flow logs
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !Ref S3KmsKey
+              SSEAlgorithm: aws:kms
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOlderThan30Days
+            Status: Enabled
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ImageBuilder-Logs'
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GrantPutObject
+            Effect: Allow
+            Action:
+              - 's3:PutObject'
+            Resource:
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              AWS: !GetAtt IamRole.Arn
 
   Component:
     Type: AWS::ImageBuilder::Component
@@ -50,8 +203,7 @@ Resources:
       Name: !Sub '${AWS::StackName}-HelloWorld-Component'
       Platform: Linux
       Version: 1.0.0
-      Description: 'This component will echo Hello World out to the console'
-      ChangeDescription: 'Initial Version'
+      Description: This component will echo Hello World out to the console
       Data: |
         name: HelloWorld
         description: This component will echo Hello World out to the console
@@ -87,7 +239,12 @@ Resources:
     Type: AWS::ImageBuilder::InfrastructureConfiguration
     Properties:
       Name: !Sub '${AWS::StackName}-HelloWorld-Infrastructure'
+      InstanceMetadataOptions:
+        HttpTokens: required
       InstanceProfileName: !Ref InstanceProfile
+      Logging:
+        S3Logs:
+          S3BucketName: !Ref S3Bucket
       SecurityGroupIds: !Ref SecurityGroups
       SubnetId: !Ref Subnet
       TerminateInstanceOnFailure: True

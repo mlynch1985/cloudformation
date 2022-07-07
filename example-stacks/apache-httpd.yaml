@@ -142,7 +142,7 @@ Resources:
               Service:
                 - !Sub 'ec2.${AWS::URLSuffix}'
             Action:
-              - sts:AssumeRole
+              - 'sts:AssumeRole'
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
@@ -150,7 +150,6 @@ Resources:
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Ref IamRole
       Roles:
         - !Ref IamRole
 
@@ -171,7 +170,7 @@ Resources:
         ServerSideEncryptionConfiguration:
           - BucketKeyEnabled: true
             ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256 # aws:kms is not currently support as of 2022.07.01
+              SSEAlgorithm: AES256 # aws:kms is not currently supported for ELB access logging as of 2022.07.01
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOlderThan30Days
@@ -196,7 +195,7 @@ Resources:
           - Sid: GrantPutObject
             Effect: Allow
             Action:
-              - s3:PutObject
+              - 's3:PutObject'
             Resource:
               - !Sub '${S3Bucket.Arn}/*'
             Principal:
@@ -206,7 +205,7 @@ Resources:
           - Sid: GrantGetBucketAcl
             Effect: Allow
             Action:
-              - s3:GetBucketAcl
+              - 's3:GetBucketAcl'
             Resource:
               - !GetAtt S3Bucket.Arn
             Principal:
@@ -223,7 +222,7 @@ Resources:
           - id: W5
             reason: Enabling outbound to all destinations for demo purposes
     Properties:
-      GroupDescription: !Sub 'This group will allow HTTP access to the Elastic Load Balancer from ${SourceCidr}'
+      GroupDescription: This group will allow HTTP access to the Elastic Load Balancer
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - Description: Grants inbound HTTP access from external sources
@@ -239,7 +238,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-ELB-ApacheHttpd'
+          Value: !Sub '${AWS::StackName}-ApacheHttpd-ELB'
 
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -265,7 +264,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
+          Value: !Sub '${AWS::StackName}-ApacheHttpd-LinuxASG'
 
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -287,7 +286,6 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AWS::StackName}-ApacheHttpd'
       VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
@@ -320,7 +318,6 @@ Resources:
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
-      LaunchTemplateName: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
       LaunchTemplateData:
         IamInstanceProfile:
           Name: !Ref InstanceProfile
@@ -333,15 +330,15 @@ Resources:
         UserData: !Base64 |
           #!/bin/bash
           yum update -y
-          yum install httpd -y
+          yum install -y httpd
+          echo "Hello World from $(hostname -f)" > /var/www/html/index.html
           service httpd start
           chkconfig httpd on
-          echo "Hello World from $(hostname -f)" > /var/www/html/index.html
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
-      HealthCheckGracePeriod: 180
+      HealthCheckGracePeriod: 60
       HealthCheckType: ELB
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate
@@ -354,7 +351,7 @@ Resources:
       VPCZoneIdentifier: !Ref PrivateSubnets
       Tags:
         - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-LinuxASG-ApacheHttpd'
+          Value: !Sub '${AWS::StackName}-ApacheHttpd-LinuxASG'
           PropagateAtLaunch: true
 
   AutoScalingPolicy:
