@@ -11,6 +11,7 @@ Parameters:
 
 Resources:
   LambdaExecutionRole:
+    #checkov:skip=CKV_AWS_111:Enabling wildcard on resource to allow for any ec2 instance or alarm for demo purposes
     Type: AWS::IAM::Role
     Metadata:
       cfn_nag:
