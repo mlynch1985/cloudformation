@@ -16,6 +16,7 @@ Parameters:
     AllowedPattern: ([a-zA-Z0-9-]{1,32})
 
 Resources:
+    #checkov:skip=CKV_AWS_111:We need to enable * for all EC2 instances since the instance IDs are randomly generated
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Metadata:

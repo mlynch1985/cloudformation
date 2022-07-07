@@ -375,6 +375,7 @@ Resources:
       RetentionInDays: 30
 
   ECSCluster:
+    #checkov:skip=CKV_AWS_65:Purposedly disabling container insights for demo purposes
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub '${AWS::StackName}-ecs-cluster'
