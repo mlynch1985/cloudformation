@@ -85,11 +85,11 @@ Resources:
           - Sid: Enable Secrets Manager
             Effect: 'Allow'
             Action:
-              - kms:Encrypt*
-              - kms:Decrypt*
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:Describe*
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:Describe*'
             Resource: '*'
             Principal:
               AWS: '*'
@@ -137,13 +137,13 @@ Resources:
           - Sid: Enable RDS Access
             Effect: 'Allow'
             Action:
-              - kms:Encrypt*
-              - kms:Decrypt*
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:ListGrants
-              - kms:CreateGrant
-              - kms:Describe*
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:ListGrants'
+              - 'kms:CreateGrant'
+              - 'kms:Describe*'
             Resource: '*'
             Principal:
               AWS: '*'
@@ -161,7 +161,7 @@ Resources:
     Properties:
       Description: 'Sample RDS Instance Credentials'
       GenerateSecretString:
-        ExcludeCharacters: '"@/\`;:(){}[]-_~*'
+        ExcludePunctuation: true
         GenerateStringKey: password
         PasswordLength: 32
         RequireEachIncludedType: true
