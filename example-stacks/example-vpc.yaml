@@ -41,7 +41,7 @@ Resources:
     Properties:
       LogDestination: !GetAtt S3Bucket.Arn
       LogDestinationType: s3
-      MaxAggregationInterval: 60
+      MaxAggregationInterval: 300
       ResourceId: !Ref VPC
       ResourceType: VPC
       TrafficType: ALL
