@@ -142,7 +142,7 @@ Resources:
               Service:
                 - !Sub 'ec2.${AWS::URLSuffix}'
             Action:
-              - sts:AssumeRole
+              - 'sts:AssumeRole'
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
@@ -152,13 +152,12 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - secretsmanager:GetSecretValue
+                  - 'secretsmanager:GetSecretValue'
                 Resource: !Ref RDSSecret
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      InstanceProfileName: !Ref IamRole
       Roles:
         - !Ref IamRole
 
@@ -201,11 +200,11 @@ Resources:
           - Sid: Enable Secrets Manager
             Effect: 'Allow'
             Action:
-              - kms:Encrypt*
-              - kms:Decrypt*
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:Describe*
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:Describe*'
             Resource: '*'
             Principal:
               AWS: '*'
@@ -253,13 +252,13 @@ Resources:
           - Sid: Enable RDS Access
             Effect: 'Allow'
             Action:
-              - kms:Encrypt*
-              - kms:Decrypt*
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:ListGrants
-              - kms:CreateGrant
-              - kms:Describe*
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:ListGrants'
+              - 'kms:CreateGrant'
+              - 'kms:Describe*'
             Resource: '*'
             Principal:
               AWS: '*'
@@ -275,7 +274,7 @@ Resources:
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
     Properties:
-      Description: 'Sample RDS Instance Credentials'
+      Description: Wordpress RDS Instance Credentials
       GenerateSecretString:
         ExcludePunctuation: true
         GenerateStringKey: password
@@ -314,7 +313,7 @@ Resources:
         RestrictPublicBuckets: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-S3-Wordpress'
+          Value: !Sub '${AWS::StackName}-Wordpress-AccessLogs'
 
   S3BucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -346,6 +345,13 @@ Resources:
 
   ELBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
     Properties:
       GroupDescription: !Sub 'This group will allow HTTP access to the Elastic Load Balancer from ${SourceCidr}'
       VpcId: !Ref VpcId
@@ -356,14 +362,12 @@ Resources:
           ToPort: 80
           CidrIp: !Ref SourceCidr
       SecurityGroupEgress:
-        - Description: Enable outbound website healthchecks
-          IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: !Ref SourceCidr
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: '0.0.0.0/0'
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-ELB-ApacheHttpd'
+          Value: !Sub '${AWS::StackName}-Wordpress-ELB'
 
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -386,18 +390,20 @@ Resources:
       SecurityGroupEgress:
         - Description: Grants outbound to all
           IpProtocol: -1
-          CidrIp: 0.0.0.0/0
+          CidrIp: '0.0.0.0/0'
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-LinuxASG-Wordpress'
+          Value: !Sub '${AWS::StackName}-Wordpress-LinuxASG'
 
   EfsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: F1000
-            reason: Allowing for EFS instances to communicate outbound for demo purposes
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
     Properties:
       GroupDescription: Allows inbound traffic on TCP:2049 (NFS) from our EC2 servers
       VpcId: !Ref VpcId
@@ -407,17 +413,23 @@ Resources:
           FromPort: 2049
           ToPort: 2049
           SourceSecurityGroupId: !Ref EC2SecurityGroup
+      SecurityGroupEgress:
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: '0.0.0.0/0'
       Tags:
         - Key: 'Name'
-          Value: !Sub '${AWS::StackName}-EFS-Wordpress'
+          Value: !Sub '${AWS::StackName}-Wordpress-EFS'
 
   RdsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: F1000
-            reason: Allowing for RDS instances to communicate outbound for demo purposes
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
     Properties:
       GroupDescription: This group will allow TCP:3306 inbound to our RDS Instances from the wordpress servers
       VpcId: !Ref VpcId
@@ -427,9 +439,13 @@ Resources:
           FromPort: 3306
           ToPort: 3306
           SourceSecurityGroupId: !Ref EC2SecurityGroup
+      SecurityGroupEgress:
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: '0.0.0.0/0'
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-RDS-Wordpress'
+          Value: !Sub '${AWS::StackName}-Wordpress-RDS'
 
   ElasticLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -451,7 +467,6 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AWS::StackName}-Wordpress'
       VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
@@ -646,7 +661,7 @@ Resources:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       HealthCheckGracePeriod: 180
-      HealthCheckType: ELB
+      HealthCheckType: EC2 # ELB
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
