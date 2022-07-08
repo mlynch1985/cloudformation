@@ -41,7 +41,7 @@ Resources:
     Properties:
       LogDestination: !GetAtt S3Bucket.Arn
       LogDestinationType: s3
-      MaxAggregationInterval: 300
+      MaxAggregationInterval: 600
       ResourceId: !Ref VPC
       ResourceType: VPC
       TrafficType: ALL
@@ -119,7 +119,7 @@ Resources:
         Rules:
           - Id: DeleteOlderThan30Days
             Status: Enabled
-            ExpirationInDays: 60
+            ExpirationInDays: 30
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
