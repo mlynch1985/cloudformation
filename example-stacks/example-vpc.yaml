@@ -14,14 +14,14 @@ Metadata:
 Parameters:
   VpcCidr:
     Type: String
-    Default: 10.0.0.0/16
+    Default: 172.31.0.0/16
     Description: Specify the VPC cidr (max=/16 min=/22)
-    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/([1][6-9]|[2][0-2])
-    ConstraintDescription: Must be a valid IP cidr range between /16 and /22 and in the 0.0.0.0/0 format
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/([1][6-9]|[2][0-4])
+    ConstraintDescription: Must be a valid IP cidr range between /16 and /24 and in the 0.0.0.0/0 format
   SubnetMask:
     Type: Number
     Default: 8
-    MinValue: 7
+    MinValue: 4
     MaxValue: 13
     Description: Specify the Subnet Size (ex. /24 is 8)
 
@@ -34,7 +34,7 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}'
+          Value: !Ref AWS::StackName
 
   VpcFlowLog:
     Type: AWS::EC2::FlowLog
@@ -47,7 +47,52 @@ Resources:
       TrafficType: ALL
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}'
+          Value: !Ref AWS::StackName
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in the S3 Bucket
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable VPC Flow Logs
+            Effect: 'Allow'
+            Action:
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:Describe*'
+            Resource: '*'
+            Principal:
+              Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
+            Condition:
+              StringEquals:
+                kms:CallerAccount: !Ref AWS::AccountId
 
   S3Bucket:
     #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
@@ -68,7 +113,8 @@ Resources:
         ServerSideEncryptionConfiguration:
           - BucketKeyEnabled: true
             ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              KMSMasterKeyID: !GetAtt KmsKey.Arn
+              SSEAlgorithm: aws:kms
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOlderThan30Days
@@ -81,14 +127,14 @@ Resources:
         RestrictPublicBuckets: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-S3-vpc-flowlogs'
+          Value: !Sub '${AWS::StackName}-vpc-flowlogs'
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}'
+          Value: !Ref AWS::StackName
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
