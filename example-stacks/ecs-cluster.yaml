@@ -147,9 +147,9 @@ Resources:
         - !Ref IamRole
       PolicyDocument:
         Statement:
-          - Effect: Allow
+          - Sid: GrantCloudWatchLogs
+            Effect: Allow
             Action:
-              - 'logs:CreateLogGroup'
               - 'logs:CreateLogStream'
               - 'logs:PutLogEvents'
             Resource:
@@ -189,17 +189,26 @@ Resources:
           - Sid: Enable CloudWatch Logs
             Effect: 'Allow'
             Action:
-              - kms:Encrypt*
-              - kms:Decrypt*
-              - kms:ReEncrypt*
-              - kms:GenerateDataKey*
-              - kms:Describe*
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:Describe*'
             Resource: '*'
             Principal:
               Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
             Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/ecs-cluster'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      KmsKeyId: !GetAtt KmsKey.Arn
+      LogGroupName: !Sub '/${AWS::StackName}/ecs-cluster'
+      RetentionInDays: 30
 
   S3Bucket:
     #checkov:skip=CKV_AWS_18:Opting to disable Access Logging for demo purposes
@@ -336,7 +345,6 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '${AWS::StackName}-ecs-cluster'
       VpcId: !Ref VpcId
       Protocol: HTTP
       Port: 80
@@ -365,14 +373,6 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
-
-  LogGroup:
-    Type: AWS::Logs::LogGroup
-    UpdateReplacePolicy: Delete
-    DeletionPolicy: Delete
-    Properties:
-      KmsKeyId: !GetAtt KmsKey.Arn
-      RetentionInDays: 30
 
   ECSCluster:
     #checkov:skip=CKV_AWS_65:Purposedly disabling container insights for demo purposes
