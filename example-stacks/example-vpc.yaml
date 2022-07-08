@@ -92,7 +92,7 @@ Resources:
               Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
             Condition:
               StringEquals:
-                kms:CallerAccount: !Ref AWS::AccountId
+                aws:SourceAccount: !Ref AWS::AccountId
 
   S3Bucket:
     #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
