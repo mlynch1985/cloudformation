@@ -3,6 +3,11 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: Deploys EC2 Dedicated Hosts with custom options and allows for the instance family to be specified.
 
 Parameters:
+  ResourceName:
+    Type: String
+    Description: Specify an alphanumeric name including hypens for this Custom Resource
+    Default: custom-resource
+    AllowedPattern: ([a-zA-Z0-9-]{1,32})
   AvailabilityZone:
     Type: AWS::EC2::AvailabilityZone::Name
     Description: Specify the availability zone to deploy dedicated host into
@@ -42,7 +47,7 @@ Resources:
           - id: W11
             reason: Enabling wildcard on resource to allow for any EC2 Dedicated Host to be managed
     Properties:
-      Description: Grants Lambda access to Cloudwatch Logs and to launch dedicated hosts.
+      Description: Grants Lambda access to Cloudwatch Logs and to launch dedicated hosts
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -52,23 +57,88 @@ Resources:
                 - !Sub 'lambda.${AWS::URLSuffix}'
             Action:
               - sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
+        - PolicyName: GrantCloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-${ResourceName}*'
         - PolicyName: GrantEC2LaunchDedicatedHosts
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - ec2:DescribeHosts
-                  - ec2:AllocateHosts
-                  - ec2:ReleaseHosts
-                  - ec2:CreateTags
+                  - 'ec2:DescribeHosts'
+                  - 'ec2:AllocateHosts'
+                  - 'ec2:ReleaseHosts'
+                  - 'ec2:CreateTags'
                 Resource: '*'
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in CloudWatch Logs
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable CloudWatch Logs
+            Effect: 'Allow'
+            Action:
+              - kms:Encrypt*
+              - kms:Decrypt*
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
+            Condition:
+              ArnEquals:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-${ResourceName}'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      KmsKeyId: !GetAtt KmsKey.Arn
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-${ResourceName}'
+      RetentionInDays: 30
 
   DedicatedHost:
     Type: Custom::LambdaFunction
+    DependsOn:
+      - KmsKey
+      - LogGroup
     Properties:
       ServiceToken: !GetAtt LambdaFunction.Arn
 
@@ -76,6 +146,9 @@ Resources:
     #checkov:skip=CKV_AWS_116:Opting to not setup a Dead Letter Queue for demo purposes
     #checkov:skip=CKV_AWS_117:There is need for VPC connectivity
     Type: AWS::Lambda::Function
+    DependsOn:
+      - KmsKey
+      - LogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -85,7 +158,8 @@ Resources:
             reason: This Lambda function should not be provisioned within a VPC
     Properties:
       Architectures: [arm64]
-      Description: !Sub Deploys EC2 dedicated hosts as part of the ${AWS::StackName} Cloudformation stack.
+      Description: !Sub Deploys EC2 dedicated hosts as part of the ${AWS::StackName} Cloudformation stack
+      FunctionName: !Sub '${AWS::StackName}-${ResourceName}'
       Handler: index.lambda_handler
       ReservedConcurrentExecutions: 1
       Role: !GetAtt LambdaExecutionRole.Arn
