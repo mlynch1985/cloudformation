@@ -117,3 +117,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-open-search'
+
+Outputs:
+  WebUrl:
+    Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}/_dashboards'
+    Description: The OpenSearch Dashboard URL
