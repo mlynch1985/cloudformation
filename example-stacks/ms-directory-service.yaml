@@ -60,7 +60,7 @@ Resources:
             Resource: '*'
             Principal:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
-          - Sid: Enable CloudWatch Logs
+          - Sid: Enable Secrets Manager
             Effect: 'Allow'
             Action:
               - kms:Encrypt*
@@ -86,8 +86,8 @@ Resources:
       Name: !Sub '${AWS::StackName}-MSAD-RootCredentials'
       Description: 'Sample Active Directory Root Credentials'
       GenerateSecretString:
-        PasswordLength: 24
-        ExcludeCharacters: '"@/\'
+        ExcludePunctuation: true
+        PasswordLength: 64
 
   MicrosoftAD:
     Type: AWS::DirectoryService::MicrosoftAD
