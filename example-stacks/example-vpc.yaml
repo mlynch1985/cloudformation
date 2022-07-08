@@ -119,7 +119,7 @@ Resources:
         Rules:
           - Id: DeleteOlderThan30Days
             Status: Enabled
-            ExpirationInDays: 30
+            ExpirationInDays: 60
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
