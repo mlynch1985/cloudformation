@@ -11,20 +11,65 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}'
+          Value: !Ref AWS::StackName
 
   VpcFlowLog:
     Type: AWS::EC2::FlowLog
     Properties:
       LogDestination: !GetAtt S3Bucket.Arn
       LogDestinationType: s3
-      MaxAggregationInterval: 60
+      MaxAggregationInterval: 600
       ResourceId: !Ref VPC
       ResourceType: VPC
       TrafficType: ALL
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-flow-logs'
+          Value: !Ref AWS::StackName
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in the S3 Bucket
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable VPC Flow Logs
+            Effect: 'Allow'
+            Action:
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:Describe*'
+            Resource: '*'
+            Principal:
+              Service: !Sub 'delivery.logs.${AWS::URLSuffix}'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   S3Bucket:
     #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
@@ -45,7 +90,8 @@ Resources:
         ServerSideEncryptionConfiguration:
           - BucketKeyEnabled: true
             ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              KMSMasterKeyID: !GetAtt KmsKey.Arn
+              SSEAlgorithm: aws:kms
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOlderThan30Days
@@ -65,7 +111,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}'
+          Value: !Ref AWS::StackName
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -196,7 +242,7 @@ Resources:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PublicSubnetRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
+      DestinationCidrBlock: '0.0.0.0/0'
       GatewayId: !Ref InternetGateway
 
   PrivateSubnetARouteTable:
@@ -227,21 +273,21 @@ Resources:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PrivateSubnetARouteTable
-      DestinationCidrBlock: 0.0.0.0/0
+      DestinationCidrBlock: '0.0.0.0/0'
       NatGatewayId: !Ref NATGateway1
 
   PrivateSubnetBRoute:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PrivateSubnetBRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
+      DestinationCidrBlock: '0.0.0.0/0'
       NatGatewayId: !Ref NATGateway2
 
   PrivateSubnetCRoute:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PrivateSubnetCRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
+      DestinationCidrBlock: '0.0.0.0/0'
       NatGatewayId: !Ref NATGateway3
 
   PublicSubnetARouteTableAssociation:
