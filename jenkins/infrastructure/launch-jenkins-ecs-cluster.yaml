@@ -1,0 +1,598 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Deploys ECS Fargate Cluster running a Jenkins Master Docker Instance behind a Public ALB
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - PublicSubnets
+          - PrivateSubnets
+          - SourceCidr
+      - Label:
+          default: ECS Cluster Configuration
+        Parameters:
+          - Image
+          - CpuAmount
+          - MemoryAmount
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC ID where we should deploy this stack
+  PublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Public facing Subnets for the ELB
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Private facing Subnets for the Linux ASG
+  SourceCidr:
+    Type: String
+    Description: Provide a CIDR to allow source traffic to the ELB
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Default: 172.31.0.0/16
+  Image:
+    Type: String
+    Description: Specify the Jenkins Master image you want to launch
+  CpuAmount:
+    Type: Number
+    Description: Specify the number of CPU Units to assign to the ECS Task
+    Default: 256
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+  MemoryAmount:
+    Type: Number
+    Description: Specify the number of Memory Units to assign to the ECS Task
+    Default: 512
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+      - 10240
+      - 16384
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      ElbAccountId: 127311923021
+    us-east-2:
+      ElbAccountId: 033677994240
+    us-west-1:
+      ElbAccountId: 027434742980
+    us-west-2:
+      ElbAccountId: 797873946194
+    af-south-1:
+      ElbAccountId: 098369216593
+    ca-central-1:
+      ElbAccountId: 985666609251
+    eu-central-1:
+      ElbAccountId: 054676820928
+    eu-west-1:
+      ElbAccountId: 156460612806
+    eu-west-2:
+      ElbAccountId: 652711504416
+    eu-south-1:
+      ElbAccountId: 635631232127
+    eu-west-3:
+      ElbAccountId: 009996457667
+    eu-north-1:
+      ElbAccountId: 897822967062
+    ap-east-1:
+      ElbAccountId: 754344448648
+    ap-northeast-1:
+      ElbAccountId: 582318560864
+    ap-northeast-2:
+      ElbAccountId: 600734575887
+    ap-northeast-3:
+      ElbAccountId: 383597477331
+    ap-southeast-1:
+      ElbAccountId: 114774131450
+    ap-southeast-2:
+      ElbAccountId: 783225319266
+    ap-southeast-3:
+      ElbAccountId: 589379963580
+    ap-south-1:
+      ElbAccountId: 718504428378
+    me-south-1:
+      ElbAccountId: 076674570225
+    sa-east-1:
+      ElbAccountId: 507241528517
+
+Resources:
+  MasterIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Jenkins Master ECS Cluster IAM Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                # - !Sub 'ecs.${AWS::URLSuffix}'
+                - !Sub 'ecs-tasks.${AWS::URLSuffix}'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+
+  CloudWatchIamRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GrantCloudWatchLogsAccess
+      Roles:
+        - !Ref MasterIamRole
+      PolicyDocument:
+        Statement:
+          - Sid: GrantCloudWatchLogs
+            Effect: Allow
+            Action:
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+            Resource:
+              - !GetAtt LogGroup.Arn
+              - !Sub '${LogGroup.Arn}*'
+
+  EFSPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref MasterIamRole
+      PolicyName: GrantEfsAccess
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              # - elasticfilesystem:DescribeMountTargets
+              # - elasticfilesystem:ClientRootAccess
+              - elasticfilesystem:ClientMount
+              - elasticfilesystem:ClientWrite
+            Resource: !GetAtt EfsFileSystem.Arn
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in CloudWatch Logs
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable CloudWatch Logs
+            Effect: 'Allow'
+            Action:
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:Describe*'
+            Resource: '*'
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
+            Condition:
+              ArnEquals:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/jenkins-master'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      KmsKeyId: !GetAtt KmsKey.Arn
+      LogGroupName: !Sub '/${AWS::StackName}/jenkins-master'
+      RetentionInDays: 30
+
+  S3Bucket:
+    #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
+    #checkov:skip=CKV_AWS_21:This is a logging bucket and therefore we do not need Versioning enabled
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: We are opting to not activate access logging for demo purposes
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256 # aws:kms is not currently supported for ELB access logging as of 2022.07.01
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOlderThan30Days
+            Status: Enabled
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-AccessLogs'
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GrantPutObject
+            Effect: Allow
+            Action:
+              - 's3:PutObject'
+            Resource:
+              - !Sub '${S3Bucket.Arn}/*'
+            Principal:
+              AWS: !Sub
+                - 'arn:${AWS::Partition}:iam::${CurrentELBAccountId}:root'
+                - CurrentELBAccountId: !FindInMap [RegionMap, !Ref AWS::Region, ElbAccountId]
+          - Sid: GrantGetBucketAcl
+            Effect: Allow
+            Action:
+              - 's3:GetBucketAcl'
+            Resource:
+              - !GetAtt S3Bucket.Arn
+            Principal:
+              Service: !Sub 'logdelivery.elb.${AWS::URLSuffix}'
+            Condition:
+              ArnLike:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling outbound to all destinations for demo purposes
+    Properties:
+      GroupDescription: This group will allow HTTP access to the Elastic Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Grants inbound HTTP access from external sources
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref SourceCidr
+      SecurityGroupEgress:
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Jenkins-ELB'
+
+  JenkinsMasterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+    Properties:
+      GroupDescription: This group will allow inbound access to the Jenkins Master instances
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Grants inbound HTTP:8080 access from ELB
+          IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ELBSecurityGroup
+        - Description: Grants inbound HTTP:50000 access from Jenkins Slave Instances
+          IpProtocol: tcp
+          FromPort: 50000
+          ToPort: 50000
+          SourceSecurityGroupId: !Ref JenkinsSlaveSecurityGroup
+      SecurityGroupEgress:
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Jenkins-Master'
+
+  JenkinsSlaveSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: This group will allow outbound communication from the Jenkins Slave instances
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Jenkins-Slave'
+
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+          - id: W40
+            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+    Properties:
+      GroupDescription: Allows inbound traffic on TCP:2049 (NFS) from our Jenkins Master instances
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: Grants inbound NFS access from our Jenkins Master instances
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref JenkinsMasterSecurityGroup
+      SecurityGroupEgress:
+        - Description: Grants outbound to all
+          IpProtocol: -1
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: 'Name'
+          Value: !Sub '${AWS::StackName}-Jenkins-EFS'
+
+  EfsFileSystem:
+    Type: AWS::EFS::FileSystem
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      BackupPolicy:
+        Status: ENABLED
+      Encrypted: true
+      PerformanceMode: generalPurpose
+
+  EfsMountPointA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups: [!Ref EfsSecurityGroup]
+      SubnetId: !Select [0, !Ref PrivateSubnets]
+
+  EfsMountPointB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups: [!Ref EfsSecurityGroup]
+      SubnetId: !Select [1, !Ref PrivateSubnets]
+
+  EfsMountPointC:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups: [!Ref EfsSecurityGroup]
+      SubnetId: !Select [2, !Ref PrivateSubnets]
+
+  EfsAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      PosixUser:
+        Uid: '1000'
+        Gid: '1000'
+      RootDirectory:
+        CreationInfo:
+          OwnerGid: '1000'
+          OwnerUid: '1000'
+          Permissions: '755'
+        Path: '/jenkins-home'
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - S3BucketPolicy
+    Properties:
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value: !Ref S3Bucket
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: true
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets: !Ref PublicSubnets
+
+  NetworkLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      Subnets: !Ref PrivateSubnets
+      Type: network
+
+  ApplicationTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /login
+      HealthCheckPort: 8080
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      Port: 8080
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 60
+        - Key: stickiness.enabled
+          Value: true
+      TargetType: ip
+      VpcId: !Ref VpcId
+
+  NetworkTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPort: 8080
+      HealthCheckProtocol: TCP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 3
+      Port: 50000
+      Protocol: TCP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 60
+        - Key: stickiness.enabled
+          Value: true
+      TargetType: ip
+      VpcId: !Ref VpcId
+
+  ApplicationListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Protocol: HTTP
+      Port: 80
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref ApplicationTargetGroup
+
+  NetworkListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Protocol: TCP
+      Port: 50000
+      LoadBalancerArn: !Ref NetworkLoadBalancer
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref NetworkTargetGroup
+
+  ECSCluster:
+    #checkov:skip=CKV_AWS_65:Purposedly disabling container insights for demo purposes
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-jenkins-master'
+
+  ECSTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: !Sub '${AWS::StackName}-jenkins-master'
+          Image: !Ref Image
+          PortMappings:
+            - ContainerPort: 8080
+            - ContainerPort: 50000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: 'master'
+          MountPoints:
+            - ContainerPath: /var/jenkins_home
+              SourceVolume: jenkins_home
+      Cpu: !Ref CpuAmount
+      ExecutionRoleArn: !GetAtt MasterIamRole.Arn
+      Memory: !Ref MemoryAmount
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt MasterIamRole.Arn
+      Volumes:
+        - Name: jenkins_home
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref EfsFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref EfsAccessPoint
+              IAM: ENABLED
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ApplicationListener
+      - NetworkListener
+    Properties:
+      Cluster: !Ref ECSCluster
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      DesiredCount: 1
+      HealthCheckGracePeriodSeconds: 300
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Sub '${AWS::StackName}-jenkins-master'
+          ContainerPort: 8080
+          TargetGroupArn: !Ref ApplicationTargetGroup
+        - ContainerName: !Sub '${AWS::StackName}-jenkins-master'
+          ContainerPort: 50000
+          TargetGroupArn: !Ref NetworkTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref PrivateSubnets
+          SecurityGroups:
+            - !Ref JenkinsMasterSecurityGroup
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryService.Arn
+          Port: 50000
+      TaskDefinition: !Ref ECSTask
+
+  PrivateNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: jenkins.local
+      Vpc: !Ref VpcId
+
+  DiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: master
+      NamespaceId: !Ref PrivateNamespace
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+
+Outputs:
+  JenkinsMasterUrl:
+    Value: !Sub 'http://${ApplicationLoadBalancer.DNSName}/'
+    Description: Public facing url of our Jenkins Master Instance
