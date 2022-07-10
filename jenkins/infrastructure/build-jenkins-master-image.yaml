@@ -182,6 +182,25 @@ Resources:
       ImageScanningConfiguration:
         ScanOnPush: true
       ImageTagMutability: MUTABLE # IMMUTABLE
+      LifecyclePolicy:
+        RegistryId: !Ref AWS::AccountId
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "remove old images",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
       RepositoryPolicyText:
         Version: '2012-10-17'
         Statement:
@@ -201,6 +220,7 @@ Resources:
   CodeBuild:
     Type: AWS::CodeBuild::Project
     Properties:
+      Name: !Sub '${AWS::StackName}-${AWS::Region}-jenkins-master'
       Artifacts:
         Type: NO_ARTIFACTS
       EncryptionKey: !GetAtt EcrKmsKey.Arn
@@ -241,6 +261,7 @@ Resources:
                 - echo "FROM jenkins/jenkins:latest" > Dockerfile
                 - echo "USER root" >> Dockerfile
                 - echo "RUN apt-get update -y" >> Dockerfile
+                - echo "USER jenkins" >> Dockerfile
                 - cat Dockerfile
 
                 - echo Logging in to Amazon ECR...
