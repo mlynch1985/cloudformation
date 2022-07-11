@@ -22,13 +22,13 @@ Metadata:
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: Select the VPC ID where we should deploy this stack
+    Description: Select the VPC ID where we should deploy Jenkins
   PublicSubnets:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Select the Public facing Subnets for the ELB
   PrivateSubnets:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Select the Private facing Subnets for the Linux ASG
+    Description: Select the Private facing Subnets for the Jenkins instance
   SourceCidr:
     Type: String
     Description: Provide a CIDR to allow source traffic to the ELB
@@ -36,11 +36,12 @@ Parameters:
     Default: 172.31.0.0/16
   Image:
     Type: String
-    Description: Specify the Jenkins Master image you want to launch
+    Description: Specify the path and tag of the repository for the Jenkins Master image
+    Default: jenkins/jenkins:latest
   CpuAmount:
     Type: Number
     Description: Specify the number of CPU Units to assign to the ECS Task
-    Default: 256
+    Default: 512
     AllowedValues:
       - 256
       - 512
@@ -50,7 +51,7 @@ Parameters:
   MemoryAmount:
     Type: Number
     Description: Specify the number of Memory Units to assign to the ECS Task
-    Default: 512
+    Default: 1024
     AllowedValues:
       - 512
       - 1024
@@ -108,57 +109,114 @@ Mappings:
       ElbAccountId: 507241528517
 
 Resources:
-  MasterIamRole:
+  ECSExecutionRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Wildcard Resource enabled with Condition policy
     Type: AWS::IAM::Role
     Properties:
-      Description: Jenkins Master ECS Cluster IAM Role
+      Description: ECS Cluster Execution Role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
               Service:
-                # - !Sub 'ecs.${AWS::URLSuffix}'
                 - !Sub 'ecs-tasks.${AWS::URLSuffix}'
             Action:
               - 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+      Policies:
+        - PolicyName: SetupECSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GrantECRAccess
+                Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                Resource: '*'
+              - Sid: GrantCloudWatchLogsAccess
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub '${LogGroup.Arn}*'
+              - Sid: GrantEFSAccess
+                Effect: Allow
+                Action:
+                  - 'elasticfilesystem:ClientMount'
+                  - 'elasticfilesystem:ClientWrite'
+                Resource: !GetAtt EfsFileSystem.Arn
 
-  CloudWatchIamRolePolicy:
-    Type: AWS::IAM::Policy
+  ECSTaskRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Wildcard Resource enabled with Condition policy
+    Type: AWS::IAM::Role
     Properties:
-      PolicyName: GrantCloudWatchLogsAccess
-      Roles:
-        - !Ref MasterIamRole
-      PolicyDocument:
-        Statement:
-          - Sid: GrantCloudWatchLogs
-            Effect: Allow
-            Action:
-              - 'logs:CreateLogStream'
-              - 'logs:PutLogEvents'
-            Resource:
-              - !GetAtt LogGroup.Arn
-              - !Sub '${LogGroup.Arn}*'
-
-  EFSPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      Roles:
-        - !Ref MasterIamRole
-      PolicyName: GrantEfsAccess
-      PolicyDocument:
+      Description: ECS Cluster Task Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
+            Principal:
+              Service:
+                - !Sub 'ecs-tasks.${AWS::URLSuffix}'
             Action:
-              # - elasticfilesystem:DescribeMountTargets
-              # - elasticfilesystem:ClientRootAccess
-              - elasticfilesystem:ClientMount
-              - elasticfilesystem:ClientWrite
-            Resource: !GetAtt EfsFileSystem.Arn
+              - 'sts:AssumeRole'
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: SetupECSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GrantGlobalECSAccess
+                Effect: Allow
+                Action:
+                  - 'ecs:ListClusters'
+                  - 'ecs:ListTaskDefinitions'
+                  - 'ecs:DescribeContainerInstances'
+                  - 'ecs:DescribeTaskDefinition'
+                  - 'ecs:RegisterTaskDefinition'
+                  - 'ecs:DeregisterTaskDefinition'
+                Resource: '*'
+              - Sid: GrantAccountECSAccess
+                Action:
+                  - 'ecs:ListContainerInstances'
+                  - 'ecs:DescribeClusters'
+                  - 'ecs:DescribeTasks'
+                  - 'ecs:RunTask'
+                  - 'ecs:StopTask'
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task*'
+              - Sid: GrantECRAccess
+                Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                Resource: '*'
+              - Sid: GrantCloudWatchLogsAccess
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub '${LogGroup.Arn}*'
 
   KmsKey:
     Type: AWS::KMS::Key
@@ -203,7 +261,7 @@ Resources:
               Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
             Condition:
               ArnEquals:
-                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/jenkins-master'
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/jenkins-master/${AWS::StackName}'
 
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -211,7 +269,7 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       KmsKeyId: !GetAtt KmsKey.Arn
-      LogGroupName: !Sub '/${AWS::StackName}/jenkins-master'
+      LogGroupName: !Sub '/jenkins-master/${AWS::StackName}'
       RetentionInDays: 30
 
   S3Bucket:
@@ -282,6 +340,8 @@ Resources:
         rules_to_suppress:
           - id: W5
             reason: Enabling outbound to all destinations for demo purposes
+          - id: W40
+            reason: Enabling outbound to all destinations for demo purposes
     Properties:
       GroupDescription: This group will allow HTTP access to the Elastic Load Balancer
       VpcId: !Ref VpcId
@@ -305,9 +365,9 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W5
-            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+            reason: Enabling outbound to all destinations for demo purposes
           - id: W40
-            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+            reason: Enabling outbound to all destinations for demo purposes
     Properties:
       GroupDescription: This group will allow inbound access to the Jenkins Master instances
       VpcId: !Ref VpcId
@@ -317,11 +377,11 @@ Resources:
           FromPort: 8080
           ToPort: 8080
           SourceSecurityGroupId: !Ref ELBSecurityGroup
-        - Description: Grants inbound HTTP:50000 access from Jenkins Slave Instances
+        - Description: Grants inbound HTTP:50000 access from Jenkins Agent Instances
           IpProtocol: tcp
           FromPort: 50000
           ToPort: 50000
-          SourceSecurityGroupId: !Ref JenkinsSlaveSecurityGroup
+          SourceSecurityGroupId: !Ref JenkinsAgentSecurityGroup
       SecurityGroupEgress:
         - Description: Grants outbound to all
           IpProtocol: -1
@@ -330,10 +390,17 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Jenkins-Master'
 
-  JenkinsSlaveSecurityGroup:
+  JenkinsAgentSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Enabling outbound to all destinations for demo purposes
+          - id: W40
+            reason: Enabling outbound to all destinations for demo purposes
     Properties:
-      GroupDescription: This group will allow outbound communication from the Jenkins Slave instances
+      GroupDescription: This group will allow outbound communication from the Jenkins Agent instances
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - Description: Grants outbound to all
@@ -341,7 +408,7 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-Jenkins-Slave'
+          Value: !Sub '${AWS::StackName}-Jenkins-Agent'
 
   EfsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -349,9 +416,9 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W5
-            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+            reason: Enabling outbound to all destinations for demo purposes
           - id: W40
-            reason: Enabling direct internet access through VPC NatGateway inside of using inspection vpc for demo purposes only
+            reason: Enabling outbound to all destinations for demo purposes
     Properties:
       GroupDescription: Allows inbound traffic on TCP:2049 (NFS) from our Jenkins Master instances
       VpcId: !Ref VpcId
@@ -433,6 +500,13 @@ Resources:
 
   NetworkLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W52
+            reason: Disabling Access Logging for Jenkins Agent Communication
+    DependsOn:
+      - S3BucketPolicy
     Properties:
       Scheme: internal
       Subnets: !Ref PrivateSubnets
@@ -477,6 +551,11 @@ Resources:
 
   ApplicationListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W56
+            reason: Using HTTP for demo purposes
     Properties:
       Protocol: HTTP
       Port: 80
@@ -524,7 +603,7 @@ Resources:
             - ContainerPath: /var/jenkins_home
               SourceVolume: jenkins_home
       Cpu: !Ref CpuAmount
-      ExecutionRoleArn: !GetAtt MasterIamRole.Arn
+      ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
       Memory: !Ref MemoryAmount
       NetworkMode: awsvpc
       RequiresCompatibilities:
@@ -532,7 +611,7 @@ Resources:
       RuntimePlatform:
         CpuArchitecture: ARM64
         OperatingSystemFamily: LINUX
-      TaskRoleArn: !GetAtt MasterIamRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
       Volumes:
         - Name: jenkins_home
           EFSVolumeConfiguration:

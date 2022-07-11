@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
-Description: This stack deploys a CodeBuild project that generates a Jenkins Build Agent Docker image and publishes it to an ECR Repository
+Description: This stack deploys a CodeBuild project that generates a Jenkins Agent Docker image and publishes it to an ECR Repository
 
 Resources:
   IamRole:
@@ -9,7 +9,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: Enabling wildcard on resources for demo purposes
+            reason: Wildcard Resource enabled with Condition policy
     Properties:
       Description: This role grants AWS CodeBuild access to the ECR Repo
       AssumeRolePolicyDocument:
@@ -58,7 +58,7 @@ Resources:
   CloudWatchLogsKmsKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: This key will encrypt data stored in CloudWatch Logs
+      Description: Encrypts data stored within a CloudWatch Log Group
       EnableKeyRotation: true
       MultiRegion: false
       PendingWindowInDays: 7
@@ -98,7 +98,7 @@ Resources:
               Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
             Condition:
               ArnEquals:
-                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/CodeBuild/Logs'
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AWS::StackName}'
 
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -106,17 +106,16 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       KmsKeyId: !GetAtt CloudWatchLogsKmsKey.Arn
-      LogGroupName: !Sub '/${AWS::StackName}/CodeBuild/Logs'
+      LogGroupName: !Sub '/aws/codebuild/${AWS::StackName}'
       RetentionInDays: 30
 
   EcrKmsKey:
-    #checkov:skip=CKV_AWS_33:We can use * for principal since we use Condition to limit to service
     Type: AWS::KMS::Key
     Metadata:
       cfn_nag:
         rules_to_suppress:
           - id: F76
-            reason: Access is limited using Conditions section
+            reason: Wildcard Principal enabled with Conditions policy
     Properties:
       Description: This key will encrypt images stored in ECR
       EnableKeyRotation: true
@@ -181,7 +180,7 @@ Resources:
         KmsKey: !GetAtt EcrKmsKey.Arn
       ImageScanningConfiguration:
         ScanOnPush: true
-      ImageTagMutability: MUTABLE # IMMUTABLE
+      ImageTagMutability: MUTABLE
       LifecyclePolicy:
         RegistryId: !Ref AWS::AccountId
         LifecyclePolicyText: |
@@ -189,7 +188,7 @@ Resources:
             "rules": [
               {
                 "rulePriority": 1,
-                "description": "remove old images",
+                "description": "expire more than 5 images",
                 "selection": {
                   "tagStatus": "untagged",
                   "countType": "imageCountMoreThan",
@@ -216,11 +215,14 @@ Resources:
               - 'ecr:PutImage'
               - 'ecr:UploadLayerPart'
             Principal: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   CodeBuild:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub '${AWS::StackName}-${AWS::Region}-jenkins-slave'
+      Name: !Sub 'Build-Jenkins-Agent-${AWS::StackName}-${AWS::Region}'
       Artifacts:
         Type: NO_ARTIFACTS
       EncryptionKey: !GetAtt EcrKmsKey.Arn
@@ -272,7 +274,7 @@ Resources:
                 - echo Logging in to Amazon ECR...
                 - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
 
-                - echo Building the Jenkins Master Docker image...
+                - echo Building the Jenkins Agent Docker image...
                 - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
                 - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
             post_build:

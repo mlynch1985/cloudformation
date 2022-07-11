@@ -1,0 +1,269 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Deploys ECS Fargate Cluster running Jenkins Agent Docker Instances
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - PrivateSubnets
+          - SecurityGroups
+      - Label:
+          default: ECS Cluster Configuration
+        Parameters:
+          - JenkinsUrl
+          - Image
+          - CpuAmount
+          - MemoryAmount
+
+Parameters:
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select the Private facing Subnets for the Linux ASG
+  SecurityGroups:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Select SecurityGroups to attach to the Jenkins Agents
+  JenkinsUrl:
+    Type: String
+    Description: Specify the public URL for the Jenkins Master instance
+  Image:
+    Type: String
+    Description: Specify the path and tag of the repository for the Jenkins Master image
+    Default: jenkins/jenkins:latest
+  CpuAmount:
+    Type: Number
+    Description: Specify the number of CPU Units to assign to the ECS Task
+    Default: 512
+    AllowedValues:
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+  MemoryAmount:
+    Type: Number
+    Description: Specify the number of Memory Units to assign to the ECS Task
+    Default: 1024
+    AllowedValues:
+      - 512
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+      - 10240
+      - 16384
+
+Resources:
+  ECSExecutionRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Wildcard Resource enabled with Condition policy
+    Type: AWS::IAM::Role
+    Properties:
+      Description: ECS Cluster Execution Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub 'ecs-tasks.${AWS::URLSuffix}'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: SetupECSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GrantECRAccess
+                Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                Resource: '*'
+              - Sid: GrantCloudWatchLogsAccess
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub '${LogGroup.Arn}*'
+
+  ECSTaskRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Wildcard Resource enabled with Condition policy
+    Type: AWS::IAM::Role
+    Properties:
+      Description: ECS Cluster Task Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - !Sub 'ecs-tasks.${AWS::URLSuffix}'
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*'
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: SetupECSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: GrantGlobalECSAccess
+                Effect: Allow
+                Action:
+                  - 'ecs:ListClusters'
+                  - 'ecs:ListTaskDefinitions'
+                  - 'ecs:DescribeContainerInstances'
+                  - 'ecs:DescribeTaskDefinition'
+                  - 'ecs:RegisterTaskDefinition'
+                  - 'ecs:DeregisterTaskDefinition'
+                Resource: '*'
+              - Sid: GrantAccountECSAccess
+                Action:
+                  - 'ecs:ListContainerInstances'
+                  - 'ecs:DescribeClusters'
+                  - 'ecs:DescribeTasks'
+                  - 'ecs:RunTask'
+                  - 'ecs:StopTask'
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task*'
+              - Sid: GrantECRAccess
+                Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                Resource: '*'
+              - Sid: GrantCloudWatchLogsAccess
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub '${LogGroup.Arn}*'
+
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: This key will encrypt data stored in CloudWatch Logs
+      EnableKeyRotation: true
+      MultiRegion: false
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM Policies
+            Effect: 'Allow'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource'
+              - 'kms:UntagResource'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Sid: Enable CloudWatch Logs
+            Effect: 'Allow'
+            Action:
+              - 'kms:Encrypt*'
+              - 'kms:Decrypt*'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:Describe*'
+            Resource: '*'
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
+            Condition:
+              ArnEquals:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/jenkins-agent/${AWS::StackName}'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      KmsKeyId: !GetAtt KmsKey.Arn
+      LogGroupName: !Sub '/jenkins-agent/${AWS::StackName}'
+      RetentionInDays: 30
+
+  ECSCluster:
+    #checkov:skip=CKV_AWS_65:Purposedly disabling container insights for demo purposes
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-jenkins-agent'
+
+  ECSTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: !Sub '${AWS::StackName}-jenkins-agent'
+          Command:
+            - '--init jenkins/inbound-agent'
+            - !Sub '-url ${JenkinsUrl}'
+          Environment:
+            - Name: JENKINS_URL
+              Value: !Ref JenkinsUrl
+            - Name: JENKINS_TUNNEL
+              Value: master.jenkins.local:50000
+            - Name: JENKINS_AGENT_NAME
+              Value: ecs-agent
+          Image: !Ref Image
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: 'agent'
+      Cpu: !Ref CpuAmount
+      ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
+      Memory: !Ref MemoryAmount
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DesiredCount: 3
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref PrivateSubnets
+          SecurityGroups: !Ref SecurityGroups
+      TaskDefinition: !Ref ECSTask

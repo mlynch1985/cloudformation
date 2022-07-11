@@ -29,7 +29,7 @@ Resources:
   KmsKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: This key will encrypt data stored in the S3 Bucket
+      Description: Used to encrypt VPC Flow logs in an S3 Bucket
       EnableKeyRotation: true
       MultiRegion: false
       PendingWindowInDays: 7
@@ -81,9 +81,9 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W35
-            reason: We are opting to not activate access logging for demo purposes
+            reason: Disable Bucket Access Logging
           - id: W51
-            reason: We don't want to replace the bucket policy automatically created by the vpc flow logs
+            reason: VPC Flow Logs will automatically create Bucket Policy
     Properties:
       AccessControl: LogDeliveryWrite
       BucketEncryption:
@@ -104,7 +104,7 @@ Resources:
         RestrictPublicBuckets: true
       Tags:
         - Key: Name
-          Value: !Sub '${AWS::StackName}-vpc-flowlogs'
+          Value: !Sub '${AWS::StackName}-flowlogs'
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -325,3 +325,8 @@ Resources:
     Properties:
       SubnetId: !Ref PrivateSubnetC
       RouteTableId: !Ref PrivateSubnetCRouteTable
+
+Outputs:
+  S3BucketName:
+    Description: The name of our VPC Flow Logs S3 Bucket
+    Value: !Ref S3Bucket
