@@ -12,6 +12,7 @@ Metadata:
           - PublicSubnets
           - PrivateSubnets
           - SourceCidr
+          - VpcCidr
       - Label:
           default: ECS Cluster Configuration
         Parameters:
@@ -30,6 +31,11 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Select the Private facing Subnets for the Jenkins instance
   SourceCidr:
+    Type: String
+    Description: Provide a CIDR to allow source traffic to the ELB
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    Default: 172.31.0.0/16
+  VpcCidr:
     Type: String
     Description: Provide a CIDR to allow source traffic to the ELB
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
@@ -218,6 +224,22 @@ Resources:
                   - 'logs:PutLogEvents'
                 Resource: !Sub '${LogGroup.Arn}*'
 
+  IamPassRole:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GrantIamPassRole
+      Roles: [!Ref ECSTaskRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+              - iam:PassRole
+            Resource:
+              - !GetAtt ECSExecutionRole.Arn
+              - !GetAtt ECSTaskRole.Arn
+
   KmsKey:
     Type: AWS::KMS::Key
     Properties:
@@ -351,6 +373,11 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: !Ref SourceCidr
+        - Description: Grants inbound HTTP access from Jenkins Agent Instances
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref JenkinsAgentSecurityGroup
       SecurityGroupEgress:
         - Description: Grants outbound to all
           IpProtocol: -1
@@ -377,11 +404,16 @@ Resources:
           FromPort: 8080
           ToPort: 8080
           SourceSecurityGroupId: !Ref ELBSecurityGroup
+        - Description: Grants inbound HTTP:8080 access from Jenkins Agent Instances
+          IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref JenkinsAgentSecurityGroup
         - Description: Grants inbound HTTP:50000 access from Jenkins Agent Instances
           IpProtocol: tcp
           FromPort: 50000
           ToPort: 50000
-          SourceSecurityGroupId: !Ref JenkinsAgentSecurityGroup
+          CidrIp: !Ref VpcCidr ## Needed for NLB Healthchecks
       SecurityGroupEgress:
         - Description: Grants outbound to all
           IpProtocol: -1
@@ -535,7 +567,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckIntervalSeconds: 30
-      HealthCheckPort: 8080
+      HealthCheckPort: 50000
       HealthCheckProtocol: TCP
       HealthCheckTimeoutSeconds: 10
       HealthyThresholdCount: 3
