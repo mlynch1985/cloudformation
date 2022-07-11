@@ -373,15 +373,15 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: !Ref SourceCidr
-        - Description: Grants inbound HTTP access from Jenkins Agent Instances
+        - Description: Grants inbound HTTP access from local VPC
           IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          SourceSecurityGroupId: !Ref JenkinsAgentSecurityGroup
+          CidrIp: !Ref VpcCidr
       SecurityGroupEgress:
         - Description: Grants outbound to all
           IpProtocol: -1
-          CidrIp: 0.0.0.0/0
+          CidrIp: '0.0.0.0/0'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Jenkins-ELB'
@@ -404,20 +404,20 @@ Resources:
           FromPort: 8080
           ToPort: 8080
           SourceSecurityGroupId: !Ref ELBSecurityGroup
-        - Description: Grants inbound HTTP:8080 access from Jenkins Agent Instances
+        - Description: Grants inbound HTTP:8080 access from local VPC
           IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
-          SourceSecurityGroupId: !Ref JenkinsAgentSecurityGroup
-        - Description: Grants inbound HTTP:50000 access from Jenkins Agent Instances
+          CidrIp: !Ref VpcCidr
+        - Description: Grants inbound TCP:50000 access from local VPC
           IpProtocol: tcp
           FromPort: 50000
           ToPort: 50000
-          CidrIp: !Ref VpcCidr ## Needed for NLB Healthchecks
+          CidrIp: !Ref VpcCidr
       SecurityGroupEgress:
         - Description: Grants outbound to all
           IpProtocol: -1
-          CidrIp: 0.0.0.0/0
+          CidrIp: '0.0.0.0/0'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Jenkins-Master'
@@ -437,7 +437,7 @@ Resources:
       SecurityGroupEgress:
         - Description: Grants outbound to all
           IpProtocol: -1
-          CidrIp: 0.0.0.0/0
+          CidrIp: '0.0.0.0/0'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Jenkins-Agent'
@@ -530,20 +530,6 @@ Resources:
         - !Ref ELBSecurityGroup
       Subnets: !Ref PublicSubnets
 
-  NetworkLoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W52
-            reason: Disabling Access Logging for Jenkins Agent Communication
-    DependsOn:
-      - S3BucketPolicy
-    Properties:
-      Scheme: internal
-      Subnets: !Ref PrivateSubnets
-      Type: network
-
   ApplicationTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -555,24 +541,6 @@ Resources:
       HealthyThresholdCount: 3
       Port: 8080
       Protocol: HTTP
-      TargetGroupAttributes:
-        - Key: deregistration_delay.timeout_seconds
-          Value: 60
-        - Key: stickiness.enabled
-          Value: true
-      TargetType: ip
-      VpcId: !Ref VpcId
-
-  NetworkTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckIntervalSeconds: 30
-      HealthCheckPort: 50000
-      HealthCheckProtocol: TCP
-      HealthCheckTimeoutSeconds: 10
-      HealthyThresholdCount: 3
-      Port: 50000
-      Protocol: TCP
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: 60
@@ -597,18 +565,6 @@ Resources:
           ForwardConfig:
             TargetGroups:
               - TargetGroupArn: !Ref ApplicationTargetGroup
-
-  NetworkListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      Protocol: TCP
-      Port: 50000
-      LoadBalancerArn: !Ref NetworkLoadBalancer
-      DefaultActions:
-        - Type: forward
-          ForwardConfig:
-            TargetGroups:
-              - TargetGroupArn: !Ref NetworkTargetGroup
 
   ECSCluster:
     #checkov:skip=CKV_AWS_65:Purposedly disabling container insights for demo purposes
@@ -657,7 +613,6 @@ Resources:
     Type: AWS::ECS::Service
     DependsOn:
       - ApplicationListener
-      - NetworkListener
     Properties:
       Cluster: !Ref ECSCluster
       DeploymentConfiguration:
@@ -670,9 +625,6 @@ Resources:
         - ContainerName: !Sub '${AWS::StackName}-jenkins-master'
           ContainerPort: 8080
           TargetGroupArn: !Ref ApplicationTargetGroup
-        - ContainerName: !Sub '${AWS::StackName}-jenkins-master'
-          ContainerPort: 50000
-          TargetGroupArn: !Ref NetworkTargetGroup
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
