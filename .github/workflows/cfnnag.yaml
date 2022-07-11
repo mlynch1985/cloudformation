@@ -25,3 +25,9 @@ jobs:
         with:
           input_path: example-stacks
           extra_args: --fail-on-warnings
+
+      - name: Execute cfn-nag Jenkins
+        uses: stelligent/cfn_nag@master
+        with:
+          input_path: jenkins/infrastructure
+          extra_args: --fail-on-warnings

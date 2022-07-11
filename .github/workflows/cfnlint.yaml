@@ -26,3 +26,4 @@ jobs:
       - name: Execute cfn-lint
         run: |
           cfn-lint --format pretty example-stacks/*
+          cfn-lint --format pretty jenkins/infrastructure/*
