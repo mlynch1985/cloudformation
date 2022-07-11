@@ -550,6 +550,8 @@ Resources:
       VpcId: !Ref VpcId
 
   ApplicationListener:
+    #checkov:skip=CKV_AWS_2:Using HTTP for demo purposes
+    #checkov:skip=CKV_AWS_103:Using HTTP for demo purposes
     Type: AWS::ElasticLoadBalancingV2::Listener
     Metadata:
       cfn_nag:
