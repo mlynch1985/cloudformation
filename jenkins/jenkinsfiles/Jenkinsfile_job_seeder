@@ -1,0 +1,166 @@
+// Requires the "pipeline-utility-steps" and "Job DSL" plugins to be installed first
+// This Jenkinsfile should belong to a Jenkins Pipeline job that is connected to a Source Control Management Repository
+// When executing this job, it will checkout the code from the SCM Repo, scan for CloudFormation templates and
+// will create a Jenkins folder structure and jobs to manage each CloudFormation template
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(daysToKeepStr:'5', numToKeepStr:'10'))
+        disableConcurrentBuilds()
+        timeout(time: 10, unit: 'MINUTES')
+        timestamps()
+    }
+
+    parameters {
+        string(name: 'GIT_URL', defaultValue: 'https://github.com/mlynch1985/cloudformation.git', description: 'Specify the HTTPS URL for the GIT Repo to checkout')
+        // string(name: 'GIT_CREDENTIAL', defaultValue: '', description: 'Select the Jenkins Credential used to connect to your GIT Repository')
+        credentials(name: 'GIT_CREDENTIAL', defaultValue: '', description: 'A user to build with', credentialType: 'any', required: true )
+        string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Specify the BRANCH for the GIT Repo to checkout')
+        string(name: 'JENKINS_SUB_FOLDER', defaultValue: '', description: 'Specify a subfolder to nest all jobs inside of')
+        string(name: 'TEMPLATE_EXTENSION', defaultValue: 'yaml', description: 'Specify the file extension used for CloudFormation templates [yaml|yml]')
+    }
+
+    stages {
+        stage('Checking Out Git Branch') {
+            steps {
+                git(
+                    url: params.GIT_URL,
+                    branch: params.GIT_BRANCH
+                )
+            }
+        }
+        stage('Executing Job Seeder Script') {
+            steps {
+                script {
+                    // Scan through GIT Repo for CloudFormation templates
+                    CFN_TEMPLATES = findFiles(glob: "**/*.${params.TEMPLATE_EXTENSION}")
+
+                    // Test to ensure we found at least one template
+                    if (CFN_TEMPLATES) {
+                        for (TEMPLATE in CFN_TEMPLATES) {
+                            // Reset folder location on each TEMPLATE iteration
+                            CURRENT_FOLDER = params.JENKINS_SUB_FOLDER
+
+                            // Skip any folders within the repo that starts with a "." so we don't create .git, .github, etc jobs
+                            if (TEMPLATE.toString().startsWith('.')) {
+                                echo "Skipping hidden folder: ${TEMPLATE.toString()}"
+                                continue
+                            }
+
+                            // Loop through the full TEMPLATE path creating a mirrored folder structure in Jenkins as in the GIT Repo
+                            for (LAYER in TEMPLATE.toString().split('/')) {
+                                // Convert the current LAYER to TitleCase
+                                // LAYER = LAYER.capitalize()
+
+                                // The current LAYER is the file name and not a folder so let's create our JOBs
+                                if (LAYER.contains(".${TEMPLATE_EXTENSION}")) {
+                                    // Remove the file extension so we can use a friendly JOB NAME
+                                    JOB_NAME = LAYER.substring(0, LAYER.lastIndexOf('.'))
+
+                                    // Define our Jenkins Pipeline Job
+                                    jobDsl scriptText: """
+                                        pipelineJob('${CURRENT_FOLDER}/${JOB_NAME}') {
+                                            logRotator(30, 100, 30, 50)
+                                            parameters {
+                                                choiceParam('AWS_ENVIRONMENT', ['DEV', 'TEST', 'STAGING', 'PRODUCTION'])
+                                                choiceParam('AWS_REGION', ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2'])
+                                                credentialsParam('AWS_CREDENTIAL') {
+                                                    defaultValue('')
+                                                    description('Specify Jenkins Credential used to connect to target AWS Account')
+                                                    required(true)
+                                                    type('any')
+                                                }
+                                                choiceParam('STACK_ACTION', ['CREATE', 'UPDATE', 'DELETE', 'DETECT DRIFT'])
+                                            }
+                                            properties {
+                                                disableConcurrentBuilds {
+                                                    abortPrevious(false)
+                                                }
+                                            }
+                                            definition {
+                                                cps {
+                                                    sandbox()
+                                                    script('''pipeline {
+    agent {
+        label 'ecs'
+    }
+
+    stages {
+        stage('Get AWS Credentials') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: params.AWS_CREDENTIAL, usernameVariable: 'AWS_IAM_ROLE', passwordVariable: 'AWS_ACCOUNT_ID')]) {
+                    script {
+                        env.AWS_ACCOUNT_ID = AWS_ACCOUNT_ID
+                        env.AWS_IAM_ROLE = AWS_IAM_ROLE
+                    }
+                }
+            }
+        }
+        stage('Checking Out Git Branch') {
+            steps {
+                git(
+                    url: '${params.GIT_URL}',
+                    branch: '${params.GIT_BRANCH}'
+                )
+            }
+        }
+        stage('Create CloudFormation Stack') {
+            when {
+                equals(expected: 'CREATE', actual: params.STACK_ACTION)
+            }
+            steps {
+                withAWS(region: params.AWS_REGION, roleAccount: env.AWS_ACCOUNT_ID, role: env.AWS_IAM_ROLE, duration: 3600) {
+
+                    script {
+                        STACK_NAME = JOB_NAME.replace('/', '-')
+
+                        if (fileExists("\${env.JOB_NAME}.${params.TEMPLATE_EXTENSION}")) {
+                            cfnUpdate(
+                                stack: "\${STACK_NAME}",
+                                create: true,
+                                file: "\${env.JOB_NAME}.${params.TEMPLATE_EXTENSION}",
+                                onFailure: 'DELETE',
+                                timeoutInMinutes: 60
+                            )
+                        }
+                        else {
+                            echo 'Template Not Found!'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+                                                    ''')
+                                                }
+                                            }
+                                        }
+                                    """
+                                }
+                                // The current LAYER is a folder so let's create the same folder in Jenkins
+                                else {
+                                    // This is the root level folder
+                                    if (CURRENT_FOLDER == '') {
+                                        jobDsl scriptText: "folder('${LAYER}')", ignoreExisting: true
+                                    }
+                                    // This is a nested folder
+                                    else {
+                                        jobDsl scriptText: "folder('${CURRENT_FOLDER}/${LAYER}')", ignoreExisting: true
+                                    }
+
+                                    // Update the CURRENT FOLDER so we know where we left off in the next iteration
+                                    CURRENT_FOLDER = "${CURRENT_FOLDER}/${LAYER}"
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        print('\n\n ### Did not find any CloudFormation templates with a .yaml extension ###')
+                    }
+                }
+            }
+        }
+    }
+}

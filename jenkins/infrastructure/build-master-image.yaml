@@ -110,6 +110,7 @@ Resources:
       RetentionInDays: 30
 
   EcrKmsKey:
+    #checkov:skip=CKV_AWS_33:Wildcard principal locked down with Condition policy
     Type: AWS::KMS::Key
     Metadata:
       cfn_nag:
@@ -173,6 +174,7 @@ Resources:
                 kms:CallerAccount: !Ref AWS::AccountId
 
   ECR:
+    #checkov:skip=CKV_AWS_32:Wildcard principal is locked down by conditions policy
     Type: AWS::ECR::Repository
     Properties:
       EncryptionConfiguration:
@@ -180,7 +182,7 @@ Resources:
         KmsKey: !GetAtt EcrKmsKey.Arn
       ImageScanningConfiguration:
         ScanOnPush: true
-      ImageTagMutability: MUTABLE
+      ImageTagMutability: IMMUTABLE
       LifecyclePolicy:
         RegistryId: !Ref AWS::AccountId
         LifecyclePolicyText: |
@@ -235,9 +237,6 @@ Resources:
           - Name: AWS_ACCOUNT_ID
             Type: PLAINTEXT
             Value: !Ref AWS::AccountId
-          - Name: IMAGE_TAG
-            Type: PLAINTEXT
-            Value: latest
           - Name: IMAGE_REPO_NAME
             Type: PLAINTEXT
             Value: !Ref ECR
@@ -270,10 +269,11 @@ Resources:
                 - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
 
                 - echo Building the Jenkins Master Docker image...
-                - docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG .
-                - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+                - TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
+                - docker build -t $IMAGE_REPO_NAME:$TIMESTAMP .
+                - docker tag $IMAGE_REPO_NAME:$TIMESTAMP $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$TIMESTAMP
             post_build:
               commands:
                 - echo Build completed on `date`
                 - echo Pushing the Docker image...
-                - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+                - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$TIMESTAMP
