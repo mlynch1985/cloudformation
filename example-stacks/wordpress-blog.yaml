@@ -620,48 +620,57 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             amazon-linux-extras install -y epel
-            yum install -y amazon-efs-utils
+            yum install -q -y amazon-efs-utils
             mkdir -p /var/www/html
             echo "${EfsFileSystem}:/ /var/www/html efs _netdev,tls,iam 0 0" >> /etc/fstab
             mount -a
-            yum install -y httpd mysql jq
+            yum install -q -y httpd mysql jq
             amazon-linux-extras install -y php8.0
             amazon-linux-extras install -y httpd_modules
             yum clean metadata
-            yum install -y php-gd.x86_64
-            yum install -y php-mbstring.x86_64
-            yum update -y
+            yum install -q -y php-gd php-mbstring php-bcmath php-imagick
+            yum upgrade -q -y
 
-            FILE=/var/www/html/wp-config.php
-            if [[ ! -f $FILE ]]
+            FILE="/var/www/html/wp-config.php"
+            if [[ ! -f "$FILE" ]]
             then
-              dbuser=$(aws secretsmanager get-secret-value --secret-id ${RDSSecret} --region ${AWS::Region} --output text --query SecretString | jq -r .username)
-              dbpass=$(aws secretsmanager get-secret-value --secret-id ${RDSSecret} --region ${AWS::Region} --output text --query SecretString | jq -r .password)
-              cd /var/www/html
-              wget https://wordpress.org/latest.tar.gz
-              tar -zxf latest.tar.gz --strip 1
+              wget -O latest.tar.gz https://wordpress.org/latest.tar.gz
+              tar -xzf latest.tar.gz -C /var/www/html/ --strip 1
               rm -f latest.tar.gz
-              cp wp-config-sample.php wp-config.php
-              sed -i "s/database_name_here/WordpressDb/g" wp-config.php
-              sed -i "s/localhost/${RDSCluster.Endpoint.Address}/g" wp-config.php
-              sed -i "s/username_here/$dbuser/g" wp-config.php
-              sed -i "s/password_here/$dbpass/g" wp-config.php
-              sed -i "s/utf8/utf32/g" wp-config.php
-              sed -i "s#<?php#<?php\ndefine( 'WP_HOME', 'http://${ElasticLoadBalancer.DNSName}' );\ndefine( 'WP_SITEURL', 'http://${ElasticLoadBalancer.DNSName}' );#g" wp-config.php
-              echo "" >> wp-config.php
-              curl -s 'https://api.wordpress.org/secret-key/1.1/salt/' >> wp-config.php
+              cp /var/www/html/wp-config-sample.php $FILE
+              sed -i "s/utf8/utf32/g" $FILE
+              sed -i "s#<?php#<?php\ndefine( 'WP_HOME', 'http://${ElasticLoadBalancer.DNSName}' );\ndefine( 'WP_SITEURL', 'http://${ElasticLoadBalancer.DNSName}' );#g" $FILE
+              echo "" >> $FILE
+              echo "define('FS_METHOD','direct');" >> $FILE
+              echo "" >> $FILE
+              curl -s 'https://api.wordpress.org/secret-key/1.1/salt/' >> $FILE
               chown -R apache:apache /var/www
               chmod -R 755 /var/www
             fi
+
+            dbsecret=$(aws secretsmanager get-secret-value --secret-id ${RDSSecret} --region ${AWS::Region} --output text --query SecretString)
+            dbname=$(echo $dbsecret | jq -r .dbname)
+            dbhost=$(echo $dbsecret | jq -r .host)
+            dbuser=$(echo $dbsecret | jq -r .username)
+            dbpass=$(echo $dbsecret | jq -r .password)
+            sed -i "s/database_name_here/$dbname/g" $FILE
+            sed -i "s/localhost/$dbhost/g" $FILE
+            sed -i "s/username_here/$dbuser/g" $FILE
+            sed -i "s/password_here/$dbpass/g" $FILE
 
             chkconfig httpd on
             service httpd start
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+      - RDSCluster
+      - EfsMountPointA
+      - EfsMountPointB
+      - EfsMountPointC
     Properties:
       HealthCheckGracePeriod: 180
-      HealthCheckType: EC2 # ELB
+      HealthCheckType: ELB
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
@@ -689,8 +698,5 @@ Resources:
 
 Outputs:
   WordpressSiteUrl:
-    Value: !GetAtt ElasticLoadBalancer.DNSName
+    Value: !Sub 'http://${ElasticLoadBalancer.DNSName}/'
     Description: Public facing url of our Wordpress site
-  RDSEndpointAddress:
-    Value: !GetAtt RDSCluster.Endpoint.Address
-    Description: RDS Cluster Write Endpoint Address
