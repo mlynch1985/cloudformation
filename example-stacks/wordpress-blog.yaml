@@ -12,6 +12,7 @@ Metadata:
           - PublicSubnets
           - PrivateSubnets
           - SourceCidr
+          - EnableAccessLogs
       - Label:
           default: Linux ASG Configuration
         Parameters:
@@ -36,6 +37,13 @@ Parameters:
     Description: Provide a CIDR to allow source traffic to the ELB
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
     Default: 172.31.0.0/16
+  EnableAccessLogs:
+    Type: String
+    Description: Set to true if you would like to activate ELB Access Logging to S3 Bucket
+    AllowedValues:
+      - true
+      - false
+    Default: false
   AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Description: Provide the SSM Parameter path to a valid AMI ID
@@ -454,7 +462,7 @@ Resources:
     Properties:
       LoadBalancerAttributes:
         - Key: access_logs.s3.enabled
-          Value: true
+          Value: !Ref EnableAccessLogs
         - Key: access_logs.s3.bucket
           Value: !Ref S3Bucket
         - Key: routing.http.drop_invalid_header_fields.enabled
@@ -500,53 +508,6 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroup
-
-  EFSPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      Roles:
-        - !Ref IamRole
-      PolicyName: GrantEfsAccess
-      PolicyDocument:
-        Statement:
-          - Effect: Allow
-            Action:
-              - elasticfilesystem:DescribeMountTargets
-              - elasticfilesystem:ClientRootAccess
-              - elasticfilesystem:ClientMount
-              - elasticfilesystem:ClientWrite
-            Resource: !GetAtt EfsFileSystem.Arn
-
-  EfsFileSystem:
-    Type: AWS::EFS::FileSystem
-    UpdateReplacePolicy: Delete
-    DeletionPolicy: Delete
-    Properties:
-      BackupPolicy:
-        Status: ENABLED
-      Encrypted: true
-      PerformanceMode: generalPurpose
-
-  EfsMountPointA:
-    Type: AWS::EFS::MountTarget
-    Properties:
-      FileSystemId: !Ref EfsFileSystem
-      SecurityGroups: [!Ref EfsSecurityGroup]
-      SubnetId: !Select [0, !Ref PrivateSubnets]
-
-  EfsMountPointB:
-    Type: AWS::EFS::MountTarget
-    Properties:
-      FileSystemId: !Ref EfsFileSystem
-      SecurityGroups: [!Ref EfsSecurityGroup]
-      SubnetId: !Select [1, !Ref PrivateSubnets]
-
-  EfsMountPointC:
-    Type: AWS::EFS::MountTarget
-    Properties:
-      FileSystemId: !Ref EfsFileSystem
-      SecurityGroups: [!Ref EfsSecurityGroup]
-      SubnetId: !Select [2, !Ref PrivateSubnets]
 
   DBClusterParameterGroup:
     Type: AWS::RDS::DBClusterParameterGroup
@@ -603,6 +564,53 @@ Resources:
       VpcSecurityGroupIds:
         - !Ref RdsSecurityGroup
 
+  EFSPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref IamRole
+      PolicyName: GrantEfsAccess
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:DescribeMountTargets
+              - elasticfilesystem:ClientRootAccess
+              - elasticfilesystem:ClientMount
+              - elasticfilesystem:ClientWrite
+            Resource: !GetAtt EfsFileSystem.Arn
+
+  EfsFileSystem:
+    Type: AWS::EFS::FileSystem
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      BackupPolicy:
+        Status: ENABLED
+      Encrypted: true
+      PerformanceMode: generalPurpose
+
+  EfsMountPointA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups: [!Ref EfsSecurityGroup]
+      SubnetId: !Select [0, !Ref PrivateSubnets]
+
+  EfsMountPointB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups: [!Ref EfsSecurityGroup]
+      SubnetId: !Select [1, !Ref PrivateSubnets]
+
+  EfsMountPointC:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SecurityGroups: [!Ref EfsSecurityGroup]
+      SubnetId: !Select [2, !Ref PrivateSubnets]
+
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -634,10 +642,20 @@ Resources:
             FILE="/var/www/html/wp-config.php"
             if [[ ! -f "$FILE" ]]
             then
+              echo "placeholder" > $FILE
               wget -O latest.tar.gz https://wordpress.org/latest.tar.gz
               tar -xzf latest.tar.gz -C /var/www/html/ --strip 1
               rm -f latest.tar.gz
-              cp /var/www/html/wp-config-sample.php $FILE
+              cp --force /var/www/html/wp-config-sample.php $FILE
+              dbsecret=$(aws secretsmanager get-secret-value --secret-id ${RDSSecret} --region ${AWS::Region} --output text --query SecretString)
+              dbname=$(echo $dbsecret | jq -r .dbname)
+              dbhost=$(echo $dbsecret | jq -r .host)
+              dbuser=$(echo $dbsecret | jq -r .username)
+              dbpass=$(echo $dbsecret | jq -r .password)
+              sed -i "s/database_name_here/$dbname/g" $FILE
+              sed -i "s/localhost/$dbhost/g" $FILE
+              sed -i "s/username_here/$dbuser/g" $FILE
+              sed -i "s/password_here/$dbpass/g" $FILE
               sed -i "s/utf8/utf32/g" $FILE
               sed -i "s#<?php#<?php\ndefine( 'WP_HOME', 'http://${ElasticLoadBalancer.DNSName}' );\ndefine( 'WP_SITEURL', 'http://${ElasticLoadBalancer.DNSName}' );#g" $FILE
               echo "" >> $FILE
@@ -647,16 +665,6 @@ Resources:
               chown -R apache:apache /var/www
               chmod -R 755 /var/www
             fi
-
-            dbsecret=$(aws secretsmanager get-secret-value --secret-id ${RDSSecret} --region ${AWS::Region} --output text --query SecretString)
-            dbname=$(echo $dbsecret | jq -r .dbname)
-            dbhost=$(echo $dbsecret | jq -r .host)
-            dbuser=$(echo $dbsecret | jq -r .username)
-            dbpass=$(echo $dbsecret | jq -r .password)
-            sed -i "s/database_name_here/$dbname/g" $FILE
-            sed -i "s/localhost/$dbhost/g" $FILE
-            sed -i "s/username_here/$dbuser/g" $FILE
-            sed -i "s/password_here/$dbpass/g" $FILE
 
             chkconfig httpd on
             service httpd start
@@ -669,7 +677,7 @@ Resources:
       - EfsMountPointB
       - EfsMountPointC
     Properties:
-      HealthCheckGracePeriod: 180
+      HealthCheckGracePeriod: 300
       HealthCheckType: ELB
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate

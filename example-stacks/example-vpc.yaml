@@ -10,6 +10,7 @@ Metadata:
         Parameters:
           - VpcCidr
           - SubnetMask
+          - EnableVpcFlowLogs
 
 Parameters:
   VpcCidr:
@@ -24,6 +25,16 @@ Parameters:
     MinValue: 4
     MaxValue: 13
     Description: Specify the Subnet Size (ex. /24 is 8)
+  EnableVpcFlowLogs:
+    Type: String
+    Description: Set to true if you would like to activate VPC Flow Logging to S3 Bucket
+    AllowedValues:
+      - true
+      - false
+    Default: false
+
+Conditions:
+  VpcFlowLogsEnabled: !Equals ['true', !Ref EnableVpcFlowLogs]
 
 Resources:
   VPC:
@@ -38,6 +49,7 @@ Resources:
 
   VpcFlowLog:
     Type: AWS::EC2::FlowLog
+    Condition: VpcFlowLogsEnabled
     Properties:
       LogDestination: !GetAtt S3Bucket.Arn
       LogDestinationType: s3
@@ -51,6 +63,7 @@ Resources:
 
   KmsKey:
     Type: AWS::KMS::Key
+    Condition: VpcFlowLogsEnabled
     Properties:
       Description: This key will encrypt data stored in the S3 Bucket
       EnableKeyRotation: true
@@ -98,6 +111,7 @@ Resources:
     #checkov:skip=CKV_AWS_18:Access Logging is intentionally not setup for demo purposes
     #checkov:skip=CKV_AWS_21:This is a logging bucket and therefore we do not need Versioning enabled
     Type: AWS::S3::Bucket
+    Condition: VpcFlowLogsEnabled
     UpdateReplacePolicy: Retain
     DeletionPolicy: Retain
     Metadata:
