@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Amazon Connect Contact Flow Module Primitive Product
+
+Parameters:
+  Namespace:
+    Type: String
+    Description: Provide a value to uniquely identify this deployment
+    AllowedPattern: '[a-zA-Z0-9-]{3,8}'
+    ConstraintDescription: Must be an alphanumeric value that can contain hyphens and is between 3 and 8 characters long
+  ContactFlowModuleContent:
+    Type: String
+    Description: Provide the content for the contact flow module
+  ContactFlowModuleDescription:
+    Type: String
+    Description: Provide a friendly description of this contact flow module
+    AllowedPattern: '[a-zA-Z0-9 ]{3,100}'
+    ConstraintDescription: Must be an alphanumeric value and is between 3 and 100 characters long
+  ConnectInstanceArn:
+    Type: String
+    Description: Specify the full ARN of a Amazon Connect Instance to associate with
+    AllowedPattern: 'arn:aws:connect:[a-z][a-z]-[a-z]+-[1-9]:[0-9]{12}:instance/*'
+    ConstraintDescription: Must be a valid Amazon Connect Instance ARN
+  ContactFlowModuleName:
+    Type: String
+    Description: Provide a name for this contact flow
+    AllowedPattern: '[a-zA-Z0-9]{3,24}'
+    ConstraintDescription: Must be an alphanumeric value that can contain hyphens and is between 3 and 24 characters long
+  ContactFlowState:
+    Type: String
+    Description: Select the desired state for the contact flow
+    Default: ACTIVE
+    AllowedValues:
+      - ACTIVE
+      - ARCHIVED
+    ConstraintDescription: Must be a valid state of either ACTIVE or ARCHIVED
+
+Resources:
+  ContactFlowModule:
+    Type: AWS::Connect::ContactFlowModule
+    Properties:
+      Content: !Ref ContactFlowModuleContent
+      Description: !Ref ContactFlowModuleDescription
+      InstanceArn: !Ref ConnectInstanceArn
+      Name: !Sub '${Namespace}-${ContactFlowModuleName}'
+      State: !Ref ContactFlowState
+      Tags:
+        - Key: Name
+          Value: !Sub '${Namespace}-${ContactFlowModuleName}'
+
+Outputs:
+  ContactFlowModuleName:
+    Value: !Ref ContactFlowModule
+    Description: The name of the contact flow
+  ContactFlowModuleArn:
+    Value: !GetAtt ContactFlowModule.ContactFlowModuleArn
+    Description: The ARN of the contact flow

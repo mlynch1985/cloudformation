@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Amazon Connect Hours of Operation Primitive Product
+
+Parameters:
+  Namespace:
+    Type: String
+    Description: Provide a value to uniquely identify this deployment
+    AllowedPattern: '[a-zA-Z0-9-]{3,8}'
+    ConstraintDescription: Must be an alphanumeric value that can contain hyphens and is between 3 and 8 characters long
+  Description:
+    Type: String
+    Description: Provide a friendly description of the hours of operation
+    AllowedPattern: '[a-zA-Z0-9 ]{3,100}'
+    ConstraintDescription: Must be an alphanumeric value and is between 3 and 100 characters long
+  InstanceArn:
+    Type: String
+    Description: Specify the full ARN of a Amazon Connect Instance to associate with
+    AllowedPattern: 'arn:aws:connect:[a-z][a-z]-[a-z]+-[1-9]:[0-9]{12}:instance/*'
+    ConstraintDescription: Must be a valid Amazon Connect Instance ARN
+  Name:
+    Type: String
+    Description: Provide a name for this hours of operation
+    AllowedPattern: '[a-zA-Z0-9]{3,24}'
+    ConstraintDescription: Must be an alphanumeric value that can contain hyphens and is between 3 and 24 characters long
+  Timezone:
+    Type: String
+    Description: Select the timezone in which the hours of operation are for
+  WeekdayStartHours:
+    Type: Number
+    Description: Specify the hour to start in 24 hour format
+    Default: 0
+    MinValue: 0
+    MaxValue: 23
+    ConstraintDescription: Must be a number between 0 and 23
+  WeekdayStartMinutes:
+    Type: Number
+    Description: Specify the minute to start
+    Default: 0
+    MinValue: 0
+    MaxValue: 59
+    ConstraintDescription: Must be a number between 0 and 59
+  WeekdayEndHours:
+    Type: Number
+    Description: Specify the hour to end in 24 hour format
+    Default: 23
+    MinValue: 0
+    MaxValue: 23
+    ConstraintDescription: Must be a number between 0 and 23
+  WeekdayEndMinutes:
+    Type: Number
+    Description: Specify the minute to end
+    Default: 59
+    MinValue: 0
+    MaxValue: 59
+    ConstraintDescription: Must be a number between 0 and 59
+  WeekendStartHours:
+    Type: Number
+    Description: Specify the hour to start in 24 hour format
+    Default: 0
+    MinValue: 0
+    MaxValue: 23
+    ConstraintDescription: Must be a number between 0 and 23
+  WeekendStartMinutes:
+    Type: Number
+    Description: Specify the minute to start
+    Default: 0
+    MinValue: 0
+    MaxValue: 59
+    ConstraintDescription: Must be a number between 0 and 59
+  WeekendEndHours:
+    Type: Number
+    Description: Specify the hour to end in 24 hour format
+    Default: 23
+    MinValue: 0
+    MaxValue: 23
+    ConstraintDescription: Must be a number between 0 and 23
+  WeekendEndMinutes:
+    Type: Number
+    Description: Specify the minute to end
+    Default: 59
+    MinValue: 0
+    MaxValue: 59
+    ConstraintDescription: Must be a number between 0 and 59
+
+Resources:
+  HoursOfOperation:
+    Type: AWS::Connect::HoursOfOperation
+    Properties:
+      Description: !Ref Description
+      InstanceArn: !Ref InstanceArn
+      Name: !Sub '${Namespace}-${Name}'
+      TimeZone: !Ref Timezone
+      Tags:
+        - Key: Name
+          Value: !Sub '${Namespace}-${Name}'
+      Config:
+        - Day: MONDAY
+          StartTime:
+            Hours: !Ref WeekdayStartHours
+            Minutes: !Ref WeekdayStartMinutes
+          EndTime:
+            Hours: !Ref WeekdayEndHours
+            Minutes: !Ref WeekdayEndMinutes
+        - Day: TUESDAY
+          StartTime:
+            Hours: !Ref WeekdayStartHours
+            Minutes: !Ref WeekdayStartMinutes
+          EndTime:
+            Hours: !Ref WeekdayEndHours
+            Minutes: !Ref WeekdayEndMinutes
+        - Day: WEDNESDAY
+          StartTime:
+            Hours: !Ref WeekdayStartHours
+            Minutes: !Ref WeekdayStartMinutes
+          EndTime:
+            Hours: !Ref WeekdayEndHours
+            Minutes: !Ref WeekdayEndMinutes
+        - Day: THURSDAY
+          StartTime:
+            Hours: !Ref WeekdayStartHours
+            Minutes: !Ref WeekdayStartMinutes
+          EndTime:
+            Hours: !Ref WeekdayEndHours
+            Minutes: !Ref WeekdayEndMinutes
+        - Day: FRIDAY
+          StartTime:
+            Hours: !Ref WeekdayStartHours
+            Minutes: !Ref WeekdayStartMinutes
+          EndTime:
+            Hours: !Ref WeekdayEndHours
+            Minutes: !Ref WeekdayEndMinutes
+        - Day: SATURDAY
+          StartTime:
+            Hours: !Ref WeekendStartHours
+            Minutes: !Ref WeekendStartMinutes
+          EndTime:
+            Hours: !Ref WeekendEndHours
+            Minutes: !Ref WeekendEndMinutes
+        - Day: SUNDAY
+          StartTime:
+            Hours: !Ref WeekendStartHours
+            Minutes: !Ref WeekendStartMinutes
+          EndTime:
+            Hours: !Ref WeekendEndHours
+            Minutes: !Ref WeekendEndMinutes
+
+Outputs:
+  HoursOfOperationJson:
+    Value: !Ref HoursOfOperation
+    Description: The JSON configuration of the hours
+  HoursOfOperationArn:
+    Value: !GetAtt HoursOfOperation.HoursOfOperationArn
+    Description: The ARN of the configuration

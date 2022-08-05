@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Amazon Connect Phone Number Primitive Product
+
+Parameters:
+  Namespace:
+    Type: String
+    Description: Provide a value to uniquely identify this deployment
+    AllowedPattern: '[a-zA-Z0-9-]{3,8}'
+    ConstraintDescription: Must be an alphanumeric value that can contain hyphens and is between 3 and 8 characters long
+  CountryCode:
+    Type: String
+    Description: Specify the 2 digit ISO country code
+    AllowedPattern: '[A-Z][A-Z]'
+    ConstraintDescription: Must be two uppercase characters and a valid ISO country code
+  Description:
+    Type: String
+    Description: Provide a friendly description for the phone number
+    AllowedPattern: '[a-zA-Z0-9 ]{3,100}'
+    ConstraintDescription: Must be an alphanumeric value and is between 3 and 100 characters long
+  Prefix:
+    Type: String
+    Description: The prefix of the phone number. If provided, it must contain + as part of the country code.
+    Default: ''
+    AllowedPattern: ^$|^\\+[0-9]{1,15}$
+    ConstraintDescription: Must be a valid phone number prefix including the + symbol
+  TargetArn:
+    Type: String
+    Description: Specify the full ARN of a Amazon Connect Instance to associate with
+    AllowedPattern: 'arn:aws:connect:[a-z][a-z]-[a-z]+-[1-9]:[0-9]{12}:instance/*'
+    ConstraintDescription: Must be a valid Amazon Connect Instance ARN
+  Type:
+    Type: String
+    Description: Select the type of phone number
+    AllowedValues:
+      - DID
+      - TOLL_FREE
+    ConstraintDescription: Must be a valid phone number type of either DID or TOLL_FREE
+
+Resources:
+  PhoneNumber:
+    Type: AWS::Connect::PhoneNumber
+    Properties:
+      CountryCode: !Ref CountryCode
+      Description: !Ref Description
+      Prefix: !Ref Prefix
+      TargetArn: !Ref TargetArn
+      Type: !Ref Type
+      Tags:
+        - Key: Name
+          Value: !Sub '${Namespace}'
+
+Outputs:
+  PhoneNumber:
+    Value: !Ref PhoneNumber
+    Description: The phone number
+  PhoneNumberAddress:
+    Value: !GetAtt PhoneNumber.Address
+    Description: The phone number, in E.164 format
+  PhoneNumberArn:
+    Value: !GetAtt PhoneNumber.PhoneNumberArn
+    Description: The phone number's ARN

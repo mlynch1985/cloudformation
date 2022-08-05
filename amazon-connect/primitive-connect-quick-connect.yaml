@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Amazon Connect Quick Connect Primitive Product
+
+Parameters:
+  Namespace:
+    Type: String
+    Description: Provide a value to uniquely identify this deployment
+    AllowedPattern: '[a-zA-Z0-9-]{3,8}'
+    ConstraintDescription: Must be an alphanumeric value that can contain hyphens and is between 3 and 8 characters long
+  Description:
+    Type: String
+    Description: Provide a friendly description for the phone number
+    AllowedPattern: '[a-zA-Z0-9 ]{3,100}'
+    ConstraintDescription: Must be an alphanumeric value and is between 3 and 100 characters long
+  InstanceArn:
+    Type: String
+    Description: Specify the full ARN of a Amazon Connect Instance to associate with
+    AllowedPattern: 'arn:aws:connect:[a-z][a-z]-[a-z]+-[1-9]:[0-9]{12}:instance/*'
+    ConstraintDescription: Must be a valid Amazon Connect Instance ARN
+  Name:
+    Type: String
+    Description: Provide a name for this quick connect
+    AllowedPattern: '[a-zA-Z0-9]{3,24}'
+    ConstraintDescription: Must be an alphanumeric value that can contain hyphens and is between 3 and 24 characters long
+  QuickConnectType:
+    Type: String
+    Description: Select the type of quick connect to provision
+    AllowedValues:
+      - PHONE_NUMBER
+      - QUEUE
+      - USER
+    ConstraintDescription: Must be a valid quick connect type of either PHONE_NUMBER, QUEUE or USER
+  PhoneNumber:
+    Type: String
+    Description: Specify a phone number in E.164 format
+    Default: ''
+    AllowedPattern: ^$|^\\+[1-9]\\d{1,14}$
+    ConstraintDescription: Must be a valid phone number in E.164 format
+  ContactFlowArn:
+    Type: String
+    Description: Specify a full ARN of a contact flow
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:connect:[a-z][a-z]-[a-z]+-[1-9]:[0-9]{12}:instance/*$'
+    ConstraintDescription: Must be a valid contact flow ARN
+  QueueArn:
+    Type: String
+    Description: Specify a full ARN of a queue
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:connect:[a-z][a-z]-[a-z]+-[1-9]:[0-9]{12}:instance/*$'
+    ConstraintDescription: Must be a valid queue ARN
+  UserArn:
+    Type: String
+    Description: Specify a full ARN of a user
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:connect:[a-z][a-z]-[a-z]+-[1-9]:[0-9]{12}:instance/*$'
+    ConstraintDescription: Must be a valid user ARN
+
+Conditions:
+  EnablePhoneConfig: !Not [!Equals [!Ref PhoneNumber, '']]
+  EnableQueueConfig: !Not [!And [!Equals [!Ref ContactFlowArn, ''], !Equals [!Ref QueueArn, '']]]
+  EnableUserConfig: !Not [!And [!Equals [!Ref ContactFlowArn, ''], !Equals [!Ref UserArn, '']]]
+
+Resources:
+  QuickConnect:
+    Type: AWS::Connect::QuickConnect
+    Properties:
+      Description: !Ref Description
+      InstanceArn: !Ref InstanceArn
+      Name: !Ref Name
+      QuickConnectConfig:
+        QuickConnectType: !Ref QuickConnectType
+        PhoneConfig:
+          PhoneNumber: !If [EnablePhoneConfig, !Ref PhoneNumber, !Ref AWS::NoValue]
+        QueueConfig:
+          ContactFlowArn: !If [EnableQueueConfig, !Ref ContactFlowArn, !Ref AWS::NoValue]
+          QueueArn: !If [EnableQueueConfig, !Ref QueueArn, !Ref AWS::NoValue]
+        UserConfig:
+          ContactFlowArn: !If [EnableUserConfig, !Ref ContactFlowArn, !Ref AWS::NoValue]
+          UserArn: !If [EnableUserConfig, !Ref UserArn, !Ref AWS::NoValue]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Namespace}-${Name}'
+
+Outputs:
+  QuickConnectName:
+    Value: !Ref QuickConnect
+    Description: The Quick Connect name
+  QuickConnectArn:
+    Value: !GetAtt QuickConnect.QuickConnectArn
+    Description: The Quick Connect ARN
