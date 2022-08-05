@@ -456,6 +456,7 @@ Resources:
           Value: !Sub '${AWS::StackName}-Wordpress-RDS'
 
   ElasticLoadBalancer:
+    #checkov:skip=CKV_AWS_91:Access Logging is intentionally not setup for demo purposes
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     DependsOn:
       - S3BucketPolicy
