@@ -67,6 +67,7 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                 Resource:
+#                   - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
                   - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-${ResourceName}*'
         - PolicyName: GrantEC2LaunchDedicatedHosts
           PolicyDocument:
@@ -121,9 +122,9 @@ Resources:
             Resource: '*'
             Principal:
               Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
-            Condition:
-              ArnEquals:
-                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-${ResourceName}'
+#             Condition:
+#               ArnEquals:
+#                 kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-${ResourceName}'
 
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -131,7 +132,8 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       KmsKeyId: !GetAtt KmsKey.Arn
-      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-${ResourceName}'
+#       LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-${ResourceName}'
+      LogGroupName: !Sub '/aws/lambda/${LambdaFunction}'
       RetentionInDays: 30
 
   DedicatedHost:
@@ -159,7 +161,7 @@ Resources:
     Properties:
       Architectures: [arm64]
       Description: !Sub Deploys EC2 dedicated hosts as part of the ${AWS::StackName} Cloudformation stack
-      FunctionName: !Sub '${AWS::StackName}-${ResourceName}'
+#       FunctionName: !Sub '${AWS::StackName}-${ResourceName}'
       Handler: index.lambda_handler
       ReservedConcurrentExecutions: 1
       Role: !GetAtt LambdaExecutionRole.Arn
