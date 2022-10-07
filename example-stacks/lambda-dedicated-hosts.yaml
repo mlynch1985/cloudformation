@@ -3,11 +3,6 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: Deploys EC2 Dedicated Hosts with custom options and allows for the instance family to be specified.
 
 Parameters:
-  ResourceName:
-    Type: String
-    Description: Specify an alphanumeric name including hypens for this Custom Resource
-    Default: custom-resource
-    AllowedPattern: ([a-zA-Z0-9-]{1,32})
   AvailabilityZone:
     Type: AWS::EC2::AvailabilityZone::Name
     Description: Specify the availability zone to deploy dedicated host into
@@ -58,17 +53,6 @@ Resources:
             Action:
               - sts:AssumeRole
       Policies:
-        - PolicyName: GrantCloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
-#                   - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-${ResourceName}*'
         - PolicyName: GrantEC2LaunchDedicatedHosts
           PolicyDocument:
             Version: '2012-10-17'
@@ -80,6 +64,21 @@ Resources:
                   - 'ec2:ReleaseHosts'
                   - 'ec2:CreateTags'
                 Resource: '*'
+
+  CloudWatchLogsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GrantCloudWatchLogs
+      Roles: [!Ref LambdaExecutionRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+            Resource:
+              - !GetAtt LogGroup.Arn
 
   KmsKey:
     Type: AWS::KMS::Key
@@ -122,9 +121,9 @@ Resources:
             Resource: '*'
             Principal:
               Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
-#             Condition:
-#               ArnEquals:
-#                 kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-${ResourceName}'
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
 
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -132,15 +131,15 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       KmsKeyId: !GetAtt KmsKey.Arn
-#       LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-${ResourceName}'
       LogGroupName: !Sub '/aws/lambda/${LambdaFunction}'
       RetentionInDays: 30
 
-  DedicatedHost:
+  LambdaExecution:
     Type: Custom::LambdaFunction
     DependsOn:
       - KmsKey
       - LogGroup
+      - CloudWatchLogsPolicy
     Properties:
       ServiceToken: !GetAtt LambdaFunction.Arn
 
@@ -148,9 +147,6 @@ Resources:
     #checkov:skip=CKV_AWS_116:Opting to not setup a Dead Letter Queue for demo purposes
     #checkov:skip=CKV_AWS_117:There is need for VPC connectivity
     Type: AWS::Lambda::Function
-    DependsOn:
-      - KmsKey
-      - LogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -161,7 +157,6 @@ Resources:
     Properties:
       Architectures: [arm64]
       Description: !Sub Deploys EC2 dedicated hosts as part of the ${AWS::StackName} Cloudformation stack
-#       FunctionName: !Sub '${AWS::StackName}-${ResourceName}'
       Handler: index.lambda_handler
       ReservedConcurrentExecutions: 1
       Role: !GetAtt LambdaExecutionRole.Arn
@@ -241,3 +236,7 @@ Resources:
               except Exception as inst:
                 print(inst)
                 cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+            else:
+              print('default response')
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
