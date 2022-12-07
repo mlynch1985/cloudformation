@@ -1,0 +1,325 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Create Automation Roles for enabling PVRE Compliance Reporting and Patching Across All Regions",
+    "Resources": {
+        "AutomationAdministrationRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": "AWS-SystemsManager-AutomationAdministrationRole",
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "ssm.amazonaws.com"
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "AssumeRole-AWSSystemsManagerAutomationExecutionRole",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "sts:AssumeRole"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:iam::*:role/AWS-SystemsManager-AutomationExecutionRole"
+                                    }
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "organizations:ListAccountsForParent"
+                                    ],
+                                    "Resource": [
+                                        "*"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "AutomationExecutionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": "AWS-SystemsManager-AutomationExecutionRole",
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "AWS": {
+                                    "Fn::Sub": "${AWS::AccountId}"
+                                }
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "ssm.amazonaws.com"
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole"
+                ],
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "ExecutionPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "ec2:AuthorizeSecurityGroupEgress",
+                                        "ec2:AuthorizeSecurityGroupIngress",
+                                        "ec2:CreateVpcEndpoint",
+                                        "ec2:CreateSecurityGroup",
+                                        "ec2:DescribeIamInstanceProfileAssociations",
+                                        "ec2:DescribeInstances",
+                                        "ec2:DescribeRouteTables",
+                                        "ec2:DescribeSecurityGroups",
+                                        "ec2:DescribeSubnets",
+                                        "ec2:DescribeVpcEndpoints",
+                                        "ec2:DescribeVpcs",
+                                        "ec2:DisassociateIamInstanceProfile",
+                                        "ec2:DeleteVpcEndpoints",
+                                        "ec2:ModifyInstanceAttribute",
+                                        "ec2:ModifyVpcEndpoint",
+                                        "iam:ListRoles",
+                                        "iam:ListInstanceProfilesForRole",
+                                        "resource-groups:ListGroupResources",
+                                        "tag:GetResources",
+                                        "cloudformation:UpdateTerminationProtection"
+                                    ],
+                                    "Resource": "*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "ec2:AssociateIamInstanceProfile"
+                                    ],
+                                    "Resource": "*",
+                                    "Condition": {
+                                        "ForAllValues:ArnEquals": {
+                                            "ec2:InstanceProfile": {
+                                                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/SSMDefaultRoleForPVREReporting"
+                                            }
+                                        }
+                                    }
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "iam:CreateInstanceProfile",
+                                        "iam:GetInstanceProfile",
+                                        "iam:AddRoleToInstanceProfile"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/SSMDefaultRoleForPVREReporting"
+                                    }
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "iam:PassRole"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AWS-SystemsManager-AutomationExecutionRole"
+                                    }
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "iam:PassRole",
+                                        "iam:GetRole"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SSMDefaultRoleForPVREReporting"
+                                    }
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "iam:CreateServiceLinkedRole"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ssm.amazonaws.com/AWSServiceRoleForAmazonSSM"
+                                    }
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "iam:CreateRole"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"
+                                    }
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "iam:AttachRolePolicy"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"
+                                    },
+                                    "Condition": {
+                                        "ArnLike": {
+                                            "iam:PolicyARN": {
+                                                "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "ComplianceAutomationDocument": {
+            "Type": "AWS::SSM::Document",
+            "Properties": {
+                "Content": {
+                    "description": "Enables Compliance Reporting across all regions",
+                    "schemaVersion": "0.3",
+                    "assumeRole": "{{ AutomationAssumeRole }}",
+                    "parameters": {
+                        "AutomationAssumeRole": {
+                            "type": "String",
+                            "description": "(Required) The ARN of the role that allows Automation to perform the actions on your behalf. ",
+                            "default": ""
+                        },
+                        "AttachIAMRoles": {
+                            "type": "String",
+                            "description": "(Optional) Whether or not to attach IAM roles onto EC2 instances which do not already have an IAM role. Defaults to True",
+                            "default": "True"
+                        },
+                        "ExecutionRegion": {
+                            "type": "String",
+                            "description": "(Optional) The region you are executing this automation. Defaults to us-west-2",
+                            "default": "us-west-2"
+                        },
+                        "EnablePatching": {
+                            "type": "String",
+                            "description": "(Optional) Whether patching should be enabled. Defaults to True. Accepted values are either True or False",
+                            "default": "True"
+                        },
+                        "PatchingSchedule": {
+                            "type": "String",
+                            "description": "(Optional) A schedule as either a time-based entry ie. cron expression, or a frequency-based entry ie. rate expression. Defaults to \"rate(7 days)\". For more information: https://docs.aws.amazon.com/systems-manager/latest/userguide/reference-cron-and-rate-expressions.html",
+                            "default": "rate(7 days)"
+                        },
+                        "PrePatchHook": {
+                            "type": "String",
+                            "description": "(Optional) A SSM document that you wish to execute on instance prior to installing patches. Defaults to AWS-Noop",
+                            "default": "AWS-Noop"
+                        },
+                        "PostInstallHook": {
+                            "type": "String",
+                            "description": "(Optional) A SSM document that you wish to execute on instance after installing patches and before rebooting. Defaults to AWS-Noop",
+                            "default": "AWS-Noop"
+                        },
+                        "OnExitHook": {
+                            "type": "String",
+                            "description": "(Optional) A SSM document that you wish to execute on instance after rebooting and finishing the patching process. Defaults to AWS-Noop",
+                            "default": "AWS-Noop"
+                        },
+                        "CreateVPCEndpoints": {
+                            "type": "String",
+                            "description": "(Optional) Enable patching instances in VPC. Defaults to True",
+                            "default": "True"
+                        }
+                    },
+                    "mainSteps": [
+                        {
+                            "name": "Setup_IAM_Policies_And_Roles",
+                            "action": "aws:executeScript",
+                            "inputs": {
+                                "Runtime": "python3.6",
+                                "Handler": "script_handler",
+                                "InputPayload": {
+                                    "ExecutionRegion": "{{ ExecutionRegion }}"
+                                },
+                                "Script": "import boto3\nfrom botocore.config import Config\nimport json\nimport time\n\nASSUME_ROLE_ACTION = \"sts:AssumeRole\"\nALLOW_EFFECT = \"Allow\"\nVALID_EC2_SERVICE_PRINCIPALS = [\"ec2.amazonaws.com\", \"ec2.amazonaws.com.cn\"]\nDEFAULT_EC2_SSM_ROLE_TRUST_POLICY = {\n    \"Version\": \"2012-10-17\",\n    \"Statement\": [\n        {\n            \"Effect\": \"Allow\",\n            \"Principal\": {\n                \"Service\": \"ec2.amazonaws.com\"\n            },\n            \"Action\": [\n                \"sts:AssumeRole\"\n            ]\n        }\n    ]\n}\n\n\ndef script_handler(events, context):\n    \"\"\"\n    Entrance for Attach IAM Policy Step\n\n    Attaches IAM Policy to instances that have an IAM role already\n\n    :param events: Automation Handler Events Object, contains parameter passed into script\n    :param context: Automation Execution Context\n    \"\"\"\n    execution_region = events['ExecutionRegion']\n    current_region = context['global:REGION']\n    partition = get_partition_from_region(current_region)\n\n    if current_region != execution_region:\n        print(\"Skipping IAM Update as this is not the execution region...\")\n        return\n\n    config = Config(\n        retries={\n            'max_attempts': 10,\n            'mode': 'standard'\n        }\n    )\n    iam_client = boto3.client('iam', config=config)\n    iam_roles = iam_client.list_roles()['Roles']\n    ec2_iam_roles = get_ec2_iam_roles(iam_roles)\n    create_default_iam_role_for_ec2(iam_client, iam_roles, current_region)\n    attach_managed_instance_core_policy(iam_client, ec2_iam_roles, partition)\n\n\ndef create_default_iam_role_for_ec2(iam_client, iam_roles, current_region):\n    for role in iam_roles:\n        if role['RoleName'] == \"SSMDefaultRoleForPVREReporting\":\n            # If the default role already exists, skip\n            print(\"SSMDefaultRoleForPVREReporting already exists in account, skipping...\")\n            return\n\n    if current_region.startswith(\"cn-\"):\n        DEFAULT_EC2_SSM_ROLE_TRUST_POLICY[\"Statement\"][0][\"Principal\"][\"Service\"] = \"ec2.amazonaws.com.cn\"\n\n    iam_client.create_role(\n        RoleName=\"SSMDefaultRoleForPVREReporting\",\n        AssumeRolePolicyDocument=json.dumps(DEFAULT_EC2_SSM_ROLE_TRUST_POLICY)\n    )\n    iam_client.attach_role_policy(\n        RoleName=\"SSMDefaultRoleForPVREReporting\",\n        PolicyArn=\"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore\"\n    )\n    print(\"Successfully created SSMDefaultRoleForPVREReporting\")\n\n\ndef get_all_iam_roles(iam_client):\n    print(\"Getting a list of all IAM roles in your account\")\n    response = iam_client.list_roles()\n    iam_roles = response.get('Roles')\n    is_truncated = response.get('IsTruncated')\n    marker = response.get('Marker')\n    while is_truncated:\n        response = iam_client.list_roles(\n            Marker=marker\n        )\n        iam_roles.extend(response['Roles'])\n        is_truncated = response.get('IsTruncated')\n        marker = response.get('Marker')\n\n    return iam_roles\n\n\ndef get_ec2_iam_roles(iam_roles):\n    ec2_iam_roles = []\n    for role in iam_roles:\n        assume_roles = role.get('AssumeRolePolicyDocument')\n        if assume_roles is None:\n            continue\n\n        statements = assume_roles.get('Statement')\n        if statements is None:\n            continue\n\n        for statement in statements:\n            if statement.get('Action') == ASSUME_ROLE_ACTION and \\\n                    statement.get('Effect') == ALLOW_EFFECT and \\\n                    statement.get('Principal', {}).get('Service') in VALID_EC2_SERVICE_PRINCIPALS:\n                ec2_iam_roles.append(role)\n\n    return ec2_iam_roles\n\n\ndef attach_managed_instance_core_policy(iam_client, iam_roles, partition):\n    for role in iam_roles:\n        print(\"Attaching policy to role: {}\".format(role['RoleName']))\n        time.sleep(0.1)  # Enforce a maximum 10TPS\n        iam_client.attach_role_policy(\n            RoleName=role['RoleName'],\n            PolicyArn=f'arn:{partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'\n        )\n\n\ndef get_partition_from_region(region):\n    if region.startswith(\"us-gov\"):\n        return \"aws-gov\"\n    elif region.startswith(\"cn\"):\n        return \"aws-us-gov\"\n    else:\n        return \"aws\"\n"
+                            },
+                            "description": "Attach `AmazonSSMManagedInstanceCore` IAM Policy to all EC2 IAM Roles in your account and create default ssm role\n\nNote: This will only work for all existing IAM Roles. If in the future you create new IAM Roles please attach the `AmazonSSMManagedInstanceCore` policy, or re-run this Automation Document.",
+                            "isCritical": true
+                        },
+                        {
+                            "name": "Setup_Patch_Baselines",
+                            "action": "aws:executeScript",
+                            "inputs": {
+                                "Runtime": "python3.6",
+                                "Handler": "script_handler",
+                                "Script": "import boto3\nimport botocore\nfrom botocore.config import Config\n\nBASELINE_NAME_PREFIXES = [\n    'DefaultPVREAmazonLinuxPatchBaseline',\n    'DefaultPVREAmazonLinux2PatchBaseline',\n    'DefaultPVRERedhatPatchBaseline',\n    'DefaultPVREOraclePatchBaseline',\n    'DefaultPVRECentosPatchBaseline',\n    'DefaultPVREUbuntuPatchBaseline',\n    'DefaultPVREDebianPatchBaseline',\n    'DefaultPVRESusePatchBaseline',\n    'DefaultPVREWindowsPatchBaseline'\n]\nBASELINE_STACK_NAME = \"Create-PatchBaseline\"\nCLOUDFORMATION_SUCCESS_STATUS_LIST = [\"CREATE_COMPLETE\", \"UPDATE_COMPLETE\", \"UPDATE_ROLLBACK_COMPLETE\"]\nCLOUDFORMATION_STACK_CONTENTS = \"\"\"\n{\n  \"AWSTemplateFormatVersion\": \"2010-09-09\",\n  \"Outputs\": {\n    \"StackArn\": {\n      \"Value\": {\n        \"Ref\": \"AWS::StackId\"\n      }\n    }\n  },\n  \"Resources\": {\n    \"DefaultPVREUbuntuPatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Ubuntu Patch Baseline for Account: ${AWS::AccountId}\"\n        },\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"*\"\n                    ],\n                    \"Key\": \"SECTION\"\n                  }\n                ]\n              },\n              \"ApproveAfterDays\": 0\n            }\n          ]\n        },\n        \"Name\": \"DefaultPVREUbuntuPatchBaseline\",\n        \"OperatingSystem\": \"UBUNTU\"\n      }\n    },\n    \"DefaultPVREAmazonLinux2PatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"ApprovedPatchesEnableNonSecurity\": true,\n        \"Name\": \"DefaultPVREAmazonLinux2PatchBaseline\",\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"EnableNonSecurity\": false,\n              \"ApproveAfterDays\": 0,\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"Security\"\n                    ],\n                    \"Key\": \"CLASSIFICATION\"\n                  }\n                ]\n              }\n            }\n          ]\n        },\n        \"OperatingSystem\": \"AMAZON_LINUX_2\",\n        \"ApprovedPatches\": [\n          \"kernel*\"\n        ],\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Amazon Linux 2 Patch Baseline for Account: ${AWS::AccountId}\"\n        },\n        \"Sources\": [\n          {\n            \"Name\": \"AL2_CORE\",\n            \"Products\": [\"*\"],\n            \"Configuration\": \"[amzn2-core]\\\\nname=Amazon Linux 2 core repository\\\\nmirrorlist=http://amazonlinux.$awsregion.$awsdomain/$releasever/$product/latest/$basearch/mirror.list\\\\npriority=10\\\\ngpgcheck=1\\\\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-amazon-linux-2\\\\nenabled=1\\\\nmetadata_expire=300\\\\nmirrorlist_expire=300\\\\nreport_instanceid=yes\"\n          }\n        ]\n      }\n    },\n    \"DefaultPVREOraclePatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"ApprovedPatchesEnableNonSecurity\": true,\n        \"Name\": \"DefaultPVREOraclePatchBaseline\",\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"EnableNonSecurity\": false,\n              \"ApproveAfterDays\": 0,\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"Security\"\n                    ],\n                    \"Key\": \"CLASSIFICATION\"\n                  }\n                ]\n              }\n            }\n          ]\n        },\n        \"OperatingSystem\": \"ORACLE_LINUX\",\n        \"ApprovedPatches\": [\n          \"kernel*\"\n        ],\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Oracle Linux Patch Baseline for Account: ${AWS::AccountId}\"\n        }\n      }\n    },\n    \"DefaultPVRECentosPatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Centos Patch Baseline for Account: ${AWS::AccountId}\"\n        },\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"EnableNonSecurity\": true,\n              \"ApproveAfterDays\": 0,\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"*\"\n                    ],\n                    \"Key\": \"CLASSIFICATION\"\n                  }\n                ]\n              }\n            }\n          ]\n        },\n        \"Name\": \"DefaultPVRECentosPatchBaseline\",\n        \"OperatingSystem\": \"CENTOS\"\n      }\n    },\n    \"DefaultPVREDebianPatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Debian Patch Baseline for Account: ${AWS::AccountId}\"\n        },\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"*\"\n                    ],\n                    \"Key\": \"SECTION\"\n                  }\n                ]\n              },\n              \"ApproveAfterDays\": 0\n            }\n          ]\n        },\n        \"Name\": \"DefaultPVREDebianPatchBaseline\",\n        \"OperatingSystem\": \"DEBIAN\"\n      }\n    },\n    \"DefaultPVRERedhatPatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"ApprovedPatchesEnableNonSecurity\": true,\n        \"Name\": \"DefaultPVRERedhatPatchBaseline\",\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"EnableNonSecurity\": false,\n              \"ApproveAfterDays\": 0,\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"Security\"\n                    ],\n                    \"Key\": \"CLASSIFICATION\"\n                  }\n                ]\n              }\n            }\n          ]\n        },\n        \"OperatingSystem\": \"REDHAT_ENTERPRISE_LINUX\",\n        \"ApprovedPatches\": [\n          \"kernel*\"\n        ],\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Redhat Linux 2 Patch Baseline for Account: ${AWS::AccountId}\"\n        }\n      }\n    },\n    \"DefaultPVRESusePatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Suse Patch Baseline for Account: ${AWS::AccountId}\"\n        },\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"Security\"\n                    ],\n                    \"Key\": \"CLASSIFICATION\"\n                  }\n                ]\n              },\n              \"ApproveAfterDays\": 0\n            }\n          ]\n        },\n        \"Name\": \"DefaultPVRESusePatchBaseline\",\n        \"ApprovedPatches\": [\n          \"kernel*\"\n        ],\n        \"OperatingSystem\": \"SUSE\"\n      }\n    },\n    \"DefaultPVREAmazonLinuxPatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"ApprovedPatchesEnableNonSecurity\": true,\n        \"Name\": \"DefaultPVREAmazonLinuxPatchBaseline\",\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"EnableNonSecurity\": false,\n              \"ApproveAfterDays\": 0,\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"Security\"\n                    ],\n                    \"Key\": \"CLASSIFICATION\"\n                  }\n                ]\n              }\n            }\n          ]\n        },\n        \"OperatingSystem\": \"AMAZON_LINUX\",\n        \"ApprovedPatches\": [\n          \"kernel*\"\n        ],\n        \"Description\": {\n          \"Fn::Sub\": \"Default PVRE Amazon Linux Patch Baseline for Account: ${AWS::AccountId}\"\n        },\n        \"Sources\": [\n          {\n            \"Name\": \"AL_MAIN\",\n            \"Products\": [\"*\"],\n            \"Configuration\": \"[amzn-main]\\\\nname=amzn-main-Base\\\\nmirrorlist=http://repo.$awsregion.$awsdomain/2018.03/main/mirror.list\\\\nmirrorlist_expire=300\\\\nmetadata_expire=300\\\\npriority=10\\\\nfailovermethod=priority\\\\nfastestmirror_enabled=0\\\\ngpgcheck=1\\\\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-amazon-ga\\\\nenabled=1\\\\nretries=3\\\\ntimeout=5\\\\nreport_instanceid=yes\"\n          },\n          {\n            \"Name\": \"AL_UPDATES\",\n            \"Products\": [\"*\"],\n            \"Configuration\": \"[amzn-updates]\\\\nname=amzn-updates-Base\\\\nmirrorlist=http://repo.$awsregion.$awsdomain/2018.03/updates/mirror.list\\\\nmirrorlist_expire=300\\\\nmetadata_expire=300\\\\npriority=10\\\\nfailovermethod=priority\\\\nfastestmirror_enabled=0\\\\ngpgcheck=1\\\\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-amazon-ga\\\\nenabled=1\\\\nretries=3\\\\ntimeout=5\\\\nreport_instanceid=yes\"\n          }\n        ]\n      }\n    },\n    \"DefaultPVREWindowsPatchBaseline\": {\n      \"Type\": \"AWS::SSM::PatchBaseline\",\n      \"Properties\": {\n        \"Description\": {\n          \"Fn::Sub\": \"Default Windows Suse Patch Baseline for Account: ${AWS::AccountId}\"\n        },\n        \"ApprovalRules\": {\n          \"PatchRules\": [\n            {\n              \"PatchFilterGroup\": {\n                \"PatchFilters\": [\n                  {\n                    \"Values\": [\n                      \"SecurityUpdates\",\n                      \"CriticalUpdates\"\n                    ],\n                    \"Key\": \"CLASSIFICATION\"\n                  }\n                ]\n              },\n              \"ApproveAfterDays\": 0\n            }\n          ]\n        },\n        \"Name\": \"DefaultPVREWindowsPatchBaseline\",\n        \"OperatingSystem\": \"WINDOWS\"\n      }\n    }\n  }\n}\n\"\"\".strip()\n\n\ndef script_handler(events, context):\n    \"\"\"\n    Entrance for Create/Update Patch Baseline Stack Automation Step\n\n    If stack does not exist, create the stack\n    If stack does exist, make sure it has the correct content and update it if not\n\n    :param events: Automation Handler Events Object, contains parameter passed into script\n    :param context: Automation Execution Context\n    \"\"\"\n    config = Config(\n        retries={\n            'max_attempts': 10,\n            'mode': 'standard'\n        }\n    )\n    cfn_client = boto3.client(\"cloudformation\", config=config)\n    ssm_client = boto3.client(\"ssm\", config=config)\n    stack_id = get_existing_cfn_stack_if_exists(cfn_client)\n    create_or_update_stack_if_applicable(cfn_client, stack_id)\n    print(f\"Success! The {BASELINE_STACK_NAME} Stack is deployed to your account.\")\n\n    cfn_client.update_termination_protection(\n        EnableTerminationProtection=True,\n        StackName=BASELINE_STACK_NAME\n    )\n    print(f\"Enabled Termination Protection for {BASELINE_STACK_NAME}\")\n\n    set_patch_baselines_as_default(ssm_client)\n    print(\"Set Default PVRE Patch Baselines as Default\")\n\n\ndef get_existing_cfn_stack_if_exists(cfn_client):\n    stack_id = None\n    try:\n        response = cfn_client.describe_stacks(StackName=BASELINE_STACK_NAME)\n        for stack in response[\"Stacks\"]:\n            if stack[\"StackStatus\"] in CLOUDFORMATION_SUCCESS_STATUS_LIST:\n                stack_id = stack.get(\"StackId\")\n                print(f\"Found Existing Stack with Id: {stack_id}\")\n            else:\n                # If Stack previously failed to create, delete it\n                delete_failed_cfn_stack(stack.get(\"StackId\"), cfn_client)\n    except:\n        print(f\"Stack Does Not Exist: {BASELINE_STACK_NAME}\")\n\n    return stack_id\n\n\ndef delete_failed_cfn_stack(stack_id, cfn_client):\n    try:\n        cfn_client.update_termination_protection(\n            EnableTerminationProtection=False,\n            StackName=stack_id\n        )\n        cfn_client.delete_stack(\n            StackName=stack_id\n        )\n        waiter = cfn_client.get_waiter('stack_delete_complete')\n        waiter.wait(StackName=stack_id)\n    except Exception as e:\n        print(f\"Unable to Delete Stack: {stack_id}\")\n        print(str(e))\n\n\ndef create_or_update_stack_if_applicable(cfn_client, stack_id):\n    if stack_id:\n        # Stack already exists attempt to update\n        waiter = update_reporting_stack(cfn_client, stack_id)\n    else:\n        waiter, stack_id = create_reporting_stack(cfn_client)\n\n    if waiter:\n        print(\"Waiting For CloudFormation deployment to complete...\")\n        waiter.wait(StackName=stack_id)\n\n\ndef update_reporting_stack(cfn_client, stack_id):\n    print(f\"Updating Existing Stack: {stack_id}...\")\n    try:\n        cfn_client.update_stack(\n            StackName=stack_id,\n            TemplateBody=CLOUDFORMATION_STACK_CONTENTS,\n        )\n        return cfn_client.get_waiter(\"stack_update_complete\")\n    except botocore.exceptions.ClientError as ex:\n        error_message = ex.response[\"Error\"][\"Message\"]\n        if error_message == \"No updates are to be performed.\":\n            print(\"No changes, Skipping Stack Update\")\n            return None\n        else:\n            print(f\"Unable to Update Stack: {BASELINE_STACK_NAME}\")\n            raise ex\n\n\ndef create_reporting_stack(cfn_client):\n    print(f\"Creating New Stack: {BASELINE_STACK_NAME}...\")\n    try:\n        stack_id = cfn_client.create_stack(\n            StackName=BASELINE_STACK_NAME,\n            TemplateBody=CLOUDFORMATION_STACK_CONTENTS,\n        )[\"StackId\"]\n        return cfn_client.get_waiter(\"stack_create_complete\"), stack_id\n    except Exception as e:\n        print(f\"Unable to Create Stack: {BASELINE_STACK_NAME}\")\n        print(\"Follow up in the CloudFormation console for more details\")\n        raise e\n\n\ndef set_patch_baselines_as_default(ssm_client):\n    for baseline_name in BASELINE_NAME_PREFIXES:\n        baselines = ssm_client.describe_patch_baselines(\n            Filters=[\n                {\n                    'Key': 'NAME_PREFIX',\n                    'Values': [\n                        baseline_name,\n                    ]\n                },\n            ]\n        )\n        baseline_id = baselines['BaselineIdentities'][0]['BaselineId']\n        ssm_client.register_default_patch_baseline(\n            BaselineId=baseline_id\n        )\n\nprint(CLOUDFORMATION_STACK_CONTENTS)\nscript_handler(None, None)\n"
+                            },
+                            "description": "Create or Update Patch Baselines Stack and set all Patch Baselines as Default",
+                            "isCritical": true
+                        },
+                        {
+                            "name": "Schedule_Reporting_And_Patching",
+                            "action": "aws:executeScript",
+                            "inputs": {
+                                "Runtime": "python3.6",
+                                "Handler": "script_handler",
+                                "InputPayload": {
+                                    "EnablePatching": "{{ EnablePatching }}",
+                                    "PatchingSchedule": "{{ PatchingSchedule }}",
+                                    "AttachIAMRoles": "{{ AttachIAMRoles }}",
+                                    "PrePatchHook": "{{ PrePatchHook }}",
+                                    "PostInstallHook": "{{ PostInstallHook }}",
+                                    "OnExitHook": "{{ OnExitHook }}",
+                                    "AutomationAssumeRole": "{{ AutomationAssumeRole }}",
+                                    "ExecutionRegion": "{{ ExecutionRegion }}"
+                                },
+                                "Script": "import boto3\nimport botocore\n\nREPORTING_STACK_NAME = \"PVRE-ComplianceReporting\"\nCLOUDFORMATION_SUCCESS_STATUS_LIST = [\"CREATE_COMPLETE\", \"UPDATE_COMPLETE\", \"UPDATE_ROLLBACK_COMPLETE\"]\nCLOUDFORMATION_STACK_CONTENTS = \"\"\"\n{\n  \"AWSTemplateFormatVersion\": \"2010-09-09\",\n  \"Outputs\": {\n    \"StackArn\": {\n      \"Value\": {\n        \"Ref\": \"AWS::StackId\"\n      }\n    }\n  },\n  \"Conditions\": {\n    \"HasUserProvidedHooks\": {\n         \"Fn::Not\": [\n            {\"Fn::And\": [\n                { \"Fn::Equals\": [{\"Ref\": \"PrePatchHook\"}, \"AWS-Noop\"] },\n                { \"Fn::Equals\": [{\"Ref\": \"PostInstallHook\"}, \"AWS-Noop\"] },\n                { \"Fn::Equals\": [{\"Ref\": \"OnExitHook\"}, \"AWS-Noop\"] }\n            ]}\n        ]\n    },\n    \"ShouldEnableDefaultPatching\": {\n      \"Fn::And\": [\n        { \"Fn::Equals\": [{\"Ref\": \"EnablePatching\"}, \"True\"] },\n        { \"Fn::Not\": [ {\"Condition\": \"HasUserProvidedHooks\"} ] }\n      ]\n    },\n    \"ShouldEnableAdvancedPatchWithHooks\": {\n       \"Fn::And\": [\n        { \"Fn::Equals\": [{\"Ref\": \"EnablePatching\"}, \"True\"] },\n        { \"Condition\": \"HasUserProvidedHooks\" }\n       ]\n    },\n    \"IsExecutionRegion\": {\n         \"Fn::Equals\": [{\"Ref\": \"AWS::Region\"}, {\"Ref\": \"ExecutionRegion\"}]\n    },\n    \"ShouldAttachIamRoles\": {\n        \"Fn::Equals\": [{\"Ref\": \"AttachIAMRoles\"}, \"True\"]\n    },\n    \"IsChinaRegion\": {\n        \"Fn::Equals\": [{\"Ref\": \"AWS::Partition\"}, \"aws-cn\"]\n    }\n  },\n  \"Resources\": {\n    \"PvreReporting\": {\n      \"Type\": \"AWS::SSM::ResourceDataSync\",\n      \"Properties\": {\n        \"SyncName\": {\n          \"Fn::Sub\": \"${AWS::AccountId}-PvreReporting\"\n        },\n        \"BucketRegion\": {\n          \"Ref\": \"AWS::Region\"\n        },\n        \"BucketName\": {\n          \"Fn::Sub\": \"pvrev2-prod-${AWS::Region}-ssm-updates\"\n        },\n        \"SyncFormat\": \"JsonSerDe\"\n      }\n    },\n    \"CollectRunningKernelDocument\": {\n      \"Type\": \"AWS::SSM::Document\",\n      \"Properties\": {\n        \"Name\": \"PVRE-CollectRunningKernel-v2\",\n        \"DocumentType\": \"Command\",\n        \"Content\": {\n          \"schemaVersion\": \"2.2\",\n          \"description\": \"Collect Running Kernel Version on Instance\",\n          \"mainSteps\": [\n            {\n               \"precondition\": {\n                 \"StringEquals\": [\n                   \"platformType\",\n                   \"Linux\"\n                 ]\n               },\n               \"action\" : \"aws:runShellScript\",\n               \"name\" : \"CollectRunningKernel\",\n               \"inputs\" : {\n                 \"runCommand\" : [ \"#!/bin/bash\", \"token=$(curl --silent --show-error --retry 3 -X PUT \\\\\\\"http://169.254.169.254/latest/api/token\\\\\\\" -H \\\\\\\"X-aws-ec2-metadata-token-ttl-seconds: 21600\\\\\\\")\", \"instance_id=$(curl --silent --show-error --retry 3 -H \\\\\\\"X-aws-ec2-metadata-token: $token\\\\\\\" http://169.254.169.254/latest/meta-data/instance-id)\", \"kernel_version=$(uname -r)\", \"content=\\\\\\\\\\\\\\\"{\\\\\\\\\\\\\\\"SchemaVersion\\\\\\\\\\\\\\\": \\\\\\\\\\\\\\\"1.0\\\\\\\\\\\\\\\", \\\\\\\\\\\\\\\"TypeName\\\\\\\\\\\\\\\": \\\\\\\\\\\\\\\"Custom:SystemInfo\\\\\\\\\\\\\\\", \\\\\\\\\\\\\\\"Content\\\\\\\\\\\\\\\": {\\\\\\\\\\\\\\\"KernelVersion\\\\\\\\\\\\\\\": \\\\\\\\\\\\\\\"$kernel_version\\\\\\\\\\\\\\\"}}\\\\\\\\\\\\\\\"\", \"dir_path=\\\\\\\\\\\\\\\"/var/lib/amazon/ssm/$instance_id/inventory/custom\\\\\\\\\\\\\\\"\", \"mkdir -p $dir_path\", \"echo $content > $dir_path/CustomSystemInfo.json\" ]\n                }\n            }\n          ]\n        }\n      }\n    },\n    \"CollectRunningKernelAssociation\": {\n      \"Type\": \"AWS::SSM::Association\",\n      \"DependsOn\" : \"CollectRunningKernelDocument\",\n      \"Properties\": {\n        \"Name\": \"PVRE-CollectRunningKernel-v2\",\n        \"ScheduleExpression\": \"rate(2 hours)\",\n        \"AssociationName\": {\n          \"Fn::Sub\": \"${AWS::AccountId}-CollectRunningKernel\"\n        },\n        \"Targets\": [\n          {\n            \"Values\": [\n              \"*\"\n            ],\n            \"Key\": \"InstanceIds\"\n          }\n        ]\n      }\n    },\n    \"PatchWeekly\": {\n      \"Type\": \"AWS::SSM::Association\",\n      \"Condition\": \"ShouldEnableDefaultPatching\",\n      \"Properties\": {\n        \"Name\": \"AWS-RunPatchBaseline\",\n        \"ScheduleExpression\": { \"Ref\" : \"PatchingSchedule\" },\n        \"AssociationName\": {\n          \"Fn::Sub\": \"${AWS::AccountId}-PatchWeekly\"\n        },\n        \"Parameters\": {\n          \"Operation\": [\n            \"Install\"\n          ]\n        },\n        \"Targets\": [\n          {\n            \"Values\": [\n              \"*\"\n            ],\n            \"Key\": \"InstanceIds\"\n          }\n        ]\n      }\n    },\n    \"PatchWeeklyWithHooks\": {\n      \"Type\": \"AWS::SSM::Association\",\n      \"Condition\": \"ShouldEnableAdvancedPatchWithHooks\",\n      \"Properties\": {\n        \"Name\": \"AWS-RunPatchBaselineWithHooks\",\n        \"ScheduleExpression\": { \"Ref\" : \"PatchingSchedule\" },\n        \"AssociationName\": {\n          \"Fn::Sub\": \"${AWS::AccountId}-PatchWeekly\"\n        },\n        \"Parameters\": {\n          \"Operation\": [\n            \"Install\"\n          ],\n          \"PreInstallHookDocName\": [\n            { \"Ref\" : \"PrePatchHook\" }\n          ],\n          \"PostInstallHookDocName\": [\n            { \"Ref\" : \"PostInstallHook\"}\n          ],\n          \"OnExitHookDocName\": [\n            { \"Ref\" : \"OnExitHook\"}\n          ]\n        },\n        \"Targets\": [\n          {\n            \"Values\": [\n              \"*\"\n            ],\n            \"Key\": \"InstanceIds\"\n          }\n        ]\n      }\n    },\n    \"AttachIAMRole\": {\n      \"Type\": \"AWS::SSM::Association\",\n      \"Condition\": \"ShouldAttachIamRoles\",\n      \"Properties\": {\n        \"Name\": \"AWS-AttachIAMToInstance\",\n        \"ScheduleExpression\": \"cron(0 0 */1 * * ? *)\",\n        \"AssociationName\": {\n          \"Fn::Sub\": \"${AWS::AccountId}-AttachIAMRoleToInstances\"\n        },\n        \"Parameters\": {\n          \"AutomationAssumeRole\": [{ \"Ref\" : \"AutomationAssumeRole\" }],\n          \"ForceReplace\": [ \"false\" ],\n          \"RoleName\": [\"SSMDefaultRoleForPVREReporting\"]\n        },\n        \"Targets\": [\n          {\n            \"Values\": [\n              \"*\"\n            ],\n            \"Key\": \"InstanceIds\"\n          }\n        ],\n        \"AutomationTargetParameterName\": \"InstanceId\"\n      }\n    },\n  },\n  \"Parameters\": {\n    \"EnablePatching\": {\n      \"Default\": \"True\",\n      \"Type\": \"String\",\n      \"Description\": \"True or False\",\n      \"AllowedValues\": [\n        \"True\",\n        \"False\"\n      ]\n    },\n    \"AttachIAMRoles\": {\n      \"Default\": \"True\",\n      \"Type\": \"String\",\n      \"Description\": \"True or False\",\n      \"AllowedValues\": [\n        \"True\",\n        \"False\"\n      ]\n    },\n    \"PrePatchHook\": {\n      \"Type\": \"String\",\n      \"Default\": \"AWS-Noop\",\n      \"Description\": \"(Optional) A SSM document that you wish to execute on instance prior to installing patches\"\n    },\n    \"PostInstallHook\": {\n      \"Type\": \"String\",\n      \"Default\": \"AWS-Noop\",\n      \"Description\": \"(Optional) A SSM document that you wish to execute on instance after installing patches and before rebooting\"\n    },\n    \"OnExitHook\": {\n      \"Type\": \"String\",\n      \"Default\": \"AWS-Noop\",\n      \"Description\": \"(Optional) A SSM document that you wish to execute on instance after rebooting and finishing the patching process\"\n    },\n    \"PatchingSchedule\": {\n      \"Default\": \"True\",\n      \"Type\": \"String\",\n      \"Description\": \"A schedule as either a time-based entry ie. cron expression, or a frequency-based entry ie. rate expression. Defaults to \\\\\\\"rate(7 days)\\\\\\\". For more information: https://docs.aws.amazon.com/systems-manager/latest/userguide/reference-cron-and-rate-expressions.html\"\n    },\n    \"AutomationAssumeRole\": {\n     \"Default\": \"\",\n     \"Type\": \"String\",\n     \"Description\": \"(Required) The ARN of the role that allows Automation to perform the actions on your behalf.\"\n    },\n    \"ExecutionRegion\": {\n      \"Default\": \"us-west-2\",\n      \"Type\": \"String\",\n      \"Description\": \"(Optional) The region you are executing this automation from. Defaults to us-west-2\"\n    }\n  }\n}\n\"\"\".strip()\n\n\ndef script_handler(events, context):\n    \"\"\"\n    Entrance for Create/Update Compliance Reporting And Patching Stack Automation Step\n\n    If stack does not exist, create the stack\n    If stack does exist, make sure it has the correct content and update it if not\n\n    :param events: Automation Handler Events Object, contains parameter passed into script\n    :param context: Automation Execution Context\n    \"\"\"\n    should_enable_patching = events[\"EnablePatching\"]\n    patching_schedule = events[\"PatchingSchedule\"]\n    attach_iam_roles = events[\"AttachIAMRoles\"]\n    pre_patch_hook = events[\"PrePatchHook\"]\n    post_install_hook = events[\"PostInstallHook\"]\n    on_exit_hook = events[\"OnExitHook\"]\n    automation_assume_role = events[\"AutomationAssumeRole\"]\n    execution_region = events[\"ExecutionRegion\"]\n    if any(v is None for v in [should_enable_patching, patching_schedule, attach_iam_roles, pre_patch_hook, post_install_hook, on_exit_hook, automation_assume_role, execution_region]):\n        raise Exception(f\"Invalid Input Parameters passed to Enable Compliance Reporting Script. \"\n                        f\"ShouldEnablePatching: {should_enable_patching}, PatchingSchedule: {patching_schedule}, \"\n                        f\"AttachIAMRoles: {attach_iam_roles}, PrePatchHook: {pre_patch_hook}, PostInstallHook: {post_install_hook}\"\n                        f\"OnExitHook: {on_exit_hook}, AutomationAssumeRole: {automation_assume_role}\")\n\n    cfn_client = boto3.client(\"cloudformation\")\n    stack_id = get_existing_cfn_stack_if_exists(cfn_client)\n    create_or_update_stack_if_applicable(cfn_client, stack_id, events)\n    print(f\"Success! The {REPORTING_STACK_NAME} Stack is deployed to your account.\")\n\n    cfn_client.update_termination_protection(\n        EnableTerminationProtection=True,\n        StackName=REPORTING_STACK_NAME\n    )\n    print(f\"Enabled Termination Protection for {REPORTING_STACK_NAME}\")\n\n    ssm_client = boto3.client(\"ssm\")\n    create_inventory_association_if_not_exists(ssm_client)\n\n\ndef get_existing_cfn_stack_if_exists(cfn_client):\n    stack_id = None\n    try:\n        response = cfn_client.describe_stacks(StackName=REPORTING_STACK_NAME)\n        for stack in response[\"Stacks\"]:\n            if stack[\"StackStatus\"] in CLOUDFORMATION_SUCCESS_STATUS_LIST:\n                stack_id = stack.get(\"StackId\")\n                print(f\"Found Existing Stack with Id: {stack_id}\")\n            else:\n                # If Stack previously failed to create, delete it\n                delete_failed_cfn_stack(stack.get(\"StackId\"), cfn_client)\n    except:\n        print(f\"Stack Does Not Exist: {REPORTING_STACK_NAME}\")\n\n    return stack_id\n\n\ndef delete_failed_cfn_stack(stack_id, cfn_client):\n    try:\n        cfn_client.update_termination_protection(\n            EnableTerminationProtection=False,\n            StackName=stack_id\n        )\n        cfn_client.delete_stack(\n            StackName=stack_id\n        )\n        waiter = cfn_client.get_waiter(\"stack_delete_complete\")\n        waiter.wait(StackName=stack_id)\n    except Exception as e:\n        print(f\"Unable to Delete Stack: {stack_id}\")\n        print(str(e))\n\n\ndef create_or_update_stack_if_applicable(cfn_client, stack_id, events):\n    if stack_id:\n        # Stack already exists attempt to update\n        waiter = update_reporting_stack(cfn_client, stack_id, events)\n    else:\n        waiter, stack_id = create_reporting_stack(cfn_client, events)\n\n    if waiter:\n        print(\"Waiting For CloudFormation deployment to complete...\")\n        waiter.wait(StackName=stack_id)\n\n\ndef update_reporting_stack(cfn_client, stack_id, events):\n    print(f\"Updating Existing Stack: {stack_id}...\")\n    try:\n        cfn_client.update_stack(\n            StackName=stack_id,\n            TemplateBody=CLOUDFORMATION_STACK_CONTENTS,\n            Capabilities=[\"CAPABILITY_NAMED_IAM\"],\n            Parameters=[\n                {\n                    \"ParameterKey\": \"EnablePatching\",\n                    \"ParameterValue\": events[\"EnablePatching\"],\n                },\n                {\n                    \"ParameterKey\": \"PatchingSchedule\",\n                    \"ParameterValue\": events[\"PatchingSchedule\"],\n                },\n                {\n                    \"ParameterKey\": \"AttachIAMRoles\",\n                    \"ParameterValue\": events[\"AttachIAMRoles\"]\n                },\n                {\n                    \"ParameterKey\": \"AutomationAssumeRole\",\n                    \"ParameterValue\": events[\"AutomationAssumeRole\"]\n                },\n                {\n                    \"ParameterKey\": \"PrePatchHook\",\n                    \"ParameterValue\": events[\"PrePatchHook\"]\n                },\n                {\n                    \"ParameterKey\": \"PostInstallHook\",\n                    \"ParameterValue\": events[\"PostInstallHook\"]\n                },\n                {\n                    \"ParameterKey\": \"OnExitHook\",\n                    \"ParameterValue\": events[\"OnExitHook\"]\n                },\n                {\n                    \"ParameterKey\": \"ExecutionRegion\",\n                    \"ParameterValue\": events[\"ExecutionRegion\"]\n                }\n            ],\n        )\n        return cfn_client.get_waiter(\"stack_update_complete\")\n    except botocore.exceptions.ClientError as ex:\n        error_message = ex.response[\"Error\"][\"Message\"]\n        if error_message == \"No updates are to be performed.\":\n            print(\"No changes, Skipping Stack Update\")\n            return None\n        else:\n            print(f\"Unable to Update Stack: {REPORTING_STACK_NAME}\")\n            raise ex\n\n\ndef create_reporting_stack(cfn_client, events):\n    print(f\"Creating New Stack: {REPORTING_STACK_NAME}...\")\n    try:\n        stack_id = cfn_client.create_stack(\n            StackName=REPORTING_STACK_NAME,\n            TemplateBody=CLOUDFORMATION_STACK_CONTENTS,\n            Capabilities=[\"CAPABILITY_NAMED_IAM\"],\n            Parameters=[\n                {\n                    \"ParameterKey\": \"EnablePatching\",\n                    \"ParameterValue\": events[\"EnablePatching\"],\n                },\n                {\n                    \"ParameterKey\": \"PatchingSchedule\",\n                    \"ParameterValue\": events[\"PatchingSchedule\"],\n                },\n                {\n                    \"ParameterKey\": \"AttachIAMRoles\",\n                    \"ParameterValue\": events[\"AttachIAMRoles\"]\n                },\n                {\n                    \"ParameterKey\": \"AutomationAssumeRole\",\n                    \"ParameterValue\": events[\"AutomationAssumeRole\"]\n                },\n                {\n                    \"ParameterKey\": \"PrePatchHook\",\n                    \"ParameterValue\": events[\"PrePatchHook\"]\n                },\n                {\n                    \"ParameterKey\": \"PostInstallHook\",\n                    \"ParameterValue\": events[\"PostInstallHook\"]\n                },\n                {\n                    \"ParameterKey\": \"OnExitHook\",\n                    \"ParameterValue\": events[\"OnExitHook\"]\n                },\n                {\n                    \"ParameterKey\": \"ExecutionRegion\",\n                    \"ParameterValue\": events[\"ExecutionRegion\"]\n                }\n            ],\n        )[\"StackId\"]\n        return cfn_client.get_waiter(\"stack_create_complete\"), stack_id\n    except Exception as e:\n        print(f\"Unable to Create Stack: {REPORTING_STACK_NAME}\")\n        print(\"Follow up in the CloudFormation console for more details\")\n        raise e\n\n\ndef create_inventory_association_if_not_exists(ssm_client):\n    inventory_association_exists = does_inventory_association_exist(ssm_client)\n    if not inventory_association_exists:\n        create_inventory_association(ssm_client)\n        print(\"Successfully Enabled Inventory Collection\")\n    else:\n        print(\"Inventory Collection is already enabled in your account for all instances, Skipping...\")\n\n\ndef does_inventory_association_exist(ssm_client):\n    existing_inventory_associations = ssm_client.list_associations(\n        AssociationFilterList=\n        [\n            {\n                'key': 'Name',\n                'value': 'AWS-GatherSoftwareInventory'\n            }\n        ]\n    )\n    for association in existing_inventory_associations[\"Associations\"]:\n        for target in association[\"Targets\"]:\n            if '*' in target[\"Values\"] and \"InstanceIds\" == target[\"Key\"]:\n                return True\n\n    return False\n\n\ndef create_inventory_association(ssm_client):\n    return ssm_client.create_association(\n        Name='AWS-GatherSoftwareInventory',\n        Targets=[\n            {\n                'Key': 'InstanceIds',\n                'Values': [\n                    '*',\n                ]\n            },\n        ],\n        ScheduleExpression='rate(3 hours)',\n        AssociationName='PVRE-InventoryCollection',\n        ComplianceSeverity='CRITICAL'\n    )\n"
+                            },
+                            "description": "This steps schedules several resources related to PVRE Reporting and Patching\n  - Inventory Collection is scheduled once every 3 hours\n  - Kernel Data Collection is scheduled once every 2 hours\n  - Patching, if enabled, is scheduled by default once a week. This schedule can be updated via the PatchingSchedule parameter\n  - IAM roles are attached to instances without any role once a day.",
+                            "isCritical": true
+                        },
+                        {
+                            "name": "Create_VPC_Endpoints_Patching_VPC",
+                            "action": "aws:executeScript",
+                            "inputs": {
+                                "Runtime": "python3.6",
+                                "Handler": "script_handler",
+                                "InputPayload": {
+                                    "CreateVPCEndpoints": "{{ CreateVPCEndpoints }}"
+                                },
+                                "Script": "import boto3\nimport time\n\nINTERFACE_SERVICES = ['ssm', 'ec2messages', 'ssmmessages']\nGATEWAY_SERVICES = ['s3']\n\nsession = boto3.session.Session()\nregion = session.region_name\n\ndef script_handler(events, context):\n    \"\"\"\n    Identify all VPCs with private instances when requested.\n    Create a security group and service endpoints necessary for patching for each VPC.\n    Configure traffic rules of the SG attached to the VPC endpoints and attach it to the instances within.\n    \"\"\"\n    if not events['CreateVPCEndpoints']:\n      return\n    ec2_client = boto3.client('ec2')\n    vpc_ids = get_vpcs_with_private_instances(ec2_client)\n    vpc_sg_map = create_security_group_for_each_vpc(ec2_client, vpc_ids)\n    for vpc_id in vpc_sg_map.keys():\n        time.sleep(1)\n\n        # Create service Endpoint for ssm, ec2messages and ssmmessages\n        for service in INTERFACE_SERVICES:\n          time.sleep(1)\n          print(f\"Creating VPC Interface Endpoint for {service} in {vpc_id}\")\n          vpc_endpoint_id = create_interface_endpoint_for_vpc(ec2_client, vpc_id, service, region)\n          attach_sg_to_vpc_endpoint(ec2_client, vpc_sg_map[vpc_id], vpc_endpoint_id)\n        for service in GATEWAY_SERVICES:\n          time.sleep(1)\n          print(f\"Creating VPC Gateway Endpoint for {service} in {vpc_id}\")\n          vpc_endpoint_id = create_gateway_endpoint_for_vpc(ec2_client, vpc_id, service, region)\n\n        # Attach the sg to each instance within the VPC\n        print(f\"Attach SG to instances in {vpc_id}\")\n        attach_sg_to_instances_in_vpc(ec2_client, vpc_id, vpc_sg_map[vpc_id])\n\n        # Update security group inbound traffic rule to allow traffic from VPC\n        update_sg_inbound_outbound_traffic_rule_for_vpc(ec2_client, vpc_id, vpc_sg_map[vpc_id])\n    return\n\ndef get_vpcs_with_private_instances(ec2_client):\n    vpcs = ec2_client.describe_vpcs()['Vpcs']\n    vpcs_with_private_instances = []\n    try:\n        for vpc in vpcs:\n            time.sleep(1)\n            vpc_id = vpc['VpcId']\n            reservations = ec2_client.describe_instances( \\\n              Filters=[{\"Name\": \"vpc-id\", \"Values\": [vpc_id]}])['Reservations']\n            for reservation in reservations:\n                for instance in reservation['Instances']:\n                    if instance['PublicDnsName'] == '':\n                        vpcs_with_private_instances.append(vpc_id)\n                        break\n                else:\n                     continue\n                break\n            else:\n                continue\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n    return vpcs_with_private_instances\n\ndef create_security_group_for_each_vpc(ec2_client, vpc_ids):\n    GROUPNAME = \"SSMVPCEndpoints\"\n    vpc_security_group_map = {}\n    try:\n        for vpc_id in vpc_ids:\n            time.sleep(1)\n            # Create a new security group for the VPC if not exists\n            security_groups = ec2_client.describe_security_groups( \\\n              Filters=[{\"Name\": \"vpc-id\", \"Values\": [vpc_id]}, {\"Name\": \"group-name\", \"Values\": [GROUPNAME]}] \\\n            )['SecurityGroups']\n            group_id = \"\"\n            if len(security_groups) > 0:\n                # A security group already exists\n                group_id = security_groups[0]['GroupId']\n            else:\n                print(f\"Create a security group for the VPC\")\n                group_id = ec2_client.create_security_group( \\\n                  Description=\"sg for SSMPrivateEndpoint\",  GroupName=GROUPNAME, VpcId=vpc_id \\\n                )['GroupId']\n            vpc_security_group_map[vpc_id] = group_id\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n    return vpc_security_group_map\n\ndef attach_sg_to_instances_in_vpc(ec2_client, vpc_id, sg_id):\n    try:\n        reservations = ec2_client.describe_instances( \\\n          Filters=[{\"Name\": \"vpc-id\", \"Values\": [vpc_id]}])['Reservations']\n        for reservation in reservations:\n            for instance in reservation['Instances']:\n                 time.sleep(1)\n                 security_groups = instance['NetworkInterfaces'][0]['Groups']\n                 sg_ids = [x['GroupId'] for x in security_groups]\n                 sg_ids.append(sg_id)\n                 ec2_client.modify_instance_attribute(InstanceId=instance['InstanceId'], Groups=sg_ids)\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n\ndef update_sg_inbound_outbound_traffic_rule_for_vpc(ec2_client, vpc_id, group_id):\n    cidr_ip = ec2_client.describe_vpcs( \\\n      Filters=[{\"Name\": \"vpc-id\",\"Values\": [vpc_id]}] \\\n    )['Vpcs'][0]['CidrBlock']\n    try:\n        # Allow inbound traffic from the VPC if not configured properly\n        ec2_client.authorize_security_group_ingress( \\\n          IpPermissions=[{\"FromPort\": 443, \"IpProtocol\": \"TCP\", \"IpRanges\":[{\"CidrIp\":cidr_ip, \"Description\": \"vpc ip\"}], \"ToPort\":443}], \\\n          GroupId=group_id \\\n        )\n        print(f\"Updated sg {group_id} inbound traffic rule from VPC {vpc_id} with IP {cidr_ip} to https\")\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n    try:\n        # Allow outbound traffic from the security to VPC\n        ec2_client.authorize_security_group_egress( \\\n          IpPermissions=[{\"FromPort\": 443, \"IpProtocol\": \"TCP\", \"UserIdGroupPairs\":[{\"GroupId\":group_id, \"Description\": \"sg\"}], \"ToPort\":443}], \\\n          GroupId=group_id \\\n        )\n        print(f\"Updated sg {group_id} inbound traffic rule from VPC {vpc_id} with IP {cidr_ip} to https\")\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n\ndef create_interface_endpoint_for_vpc(ec2_client, vpc_id, service, region):\n    vpc_endpoint_id = \"\"\n    try:\n      vpc_endpoint_id = endpoint_exists(ec2_client, vpc_id, service, region)\n      subnet_ids = get_subnets_of_vpc(ec2_client, vpc_id)\n      if vpc_endpoint_id != \"\":\n         # A VPC endpoint already exists\n         ec2_client.modify_vpc_endpoint(AddSubnetIds=[subnet_ids[0]], VpcEndpointId=vpc_endpoint_id)\n         return vpc_endpoint_id\n      else:\n          # Create new endpoint if endpoint does not exist\n          vpc_endpoint_id = ec2_client.create_vpc_endpoint(\n            ServiceName=f\"com.amazonaws.{region}.{service}\",\n            VpcEndpointType=\"Interface\",\n            VpcId=vpc_id,\n            SubnetIds=[subnet_ids[0]]\n          )['VpcEndpoint']['VpcEndpointId']\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n    return vpc_endpoint_id\n\ndef create_gateway_endpoint_for_vpc(ec2_client, vpc_id, service, region):\n    vpc_endpoint_id = \"\"\n    try:\n      vpc_endpoint_id = endpoint_exists(ec2_client, vpc_id, service, region)\n      route_table_ids = get_route_tables_of_vpc(ec2_client, vpc_id)\n      if vpc_endpoint_id != \"\":\n        # A VPC endpoint already exists\n        ec2_client.modify_vpc_endpoint(AddRouteTableIds=route_table_ids, VpcEndpointId=vpc_endpoint_id)\n        return vpc_endpoint_id\n      else:\n        # Create new endpoint if endpoint does not exist\n        vpc_endpoint_id = ec2_client.create_vpc_endpoint(\n          ServiceName=f\"com.amazonaws.{region}.s3\",\n          VpcEndpointType=\"Gateway\",\n          VpcId=vpc_id,\n          RouteTableIds=route_table_ids\n        )['VpcEndpoint']['VpcEndpointId']\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n    return vpc_endpoint_id\n\ndef get_subnets_of_vpc(ec2_client, vpc_id):\n    subnets_ids = []\n    try:\n        subnets_ids = [x['SubnetId'] for x in ec2_client.describe_subnets( \\\n                    Filters=[{\"Name\": \"vpc-id\", \"Values\": [vpc_id]}])['Subnets']]\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n    return subnets_ids\n\ndef get_route_tables_of_vpc(ec2_client, vpc_id):\n    route_table_ids = []\n    try:\n        subnet_ids = get_subnets_of_vpc(ec2_client, vpc_id)\n        route_table_ids = [x['RouteTableId'] for x in ec2_client.describe_route_tables( \\\n                          Filters=[{\"Name\": \"association.subnet-id\", \"Values\":subnet_ids}])['RouteTables']]\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n    return route_table_ids\n\ndef endpoint_exists(ec2_client, vpc_id, service, region):\n    \"\"\"\n       Determine if VPC endpoint exists.\n       Return the endpoint id if service endpoint exists or an empty string otherwise.\n    \"\"\"\n    vpc_endpoints = ec2_client.describe_vpc_endpoints( \\\n      Filters=[{\"Name\": \"service-name\", \"Values\": [f\"com.amazonaws.{region}.{service}\"]}, \\\n               {\"Name\": \"vpc-id\", \"Values\": [vpc_id]}] \\\n    )['VpcEndpoints']\n    if len(vpc_endpoints) > 0:\n      vpc_endpoint_id = vpc_endpoints[0]['VpcEndpointId']\n      return vpc_endpoint_id\n    return \"\"\n\ndef attach_sg_to_vpc_endpoint(ec2_client, sg_id, vpc_endpoint_id):\n    \"\"\"\n       Attach SG with proper inbound traffic rule to the endpoint\n    \"\"\"\n    try:\n      ec2_client.modify_vpc_endpoint(\n        VpcEndpointId=vpc_endpoint_id,\n        AddSecurityGroupIds=[sg_id]\n      )\n    except Exception as e:\n      print(f\"An error occur {e}.\")\n"
+                            },
+                            "description": "Create VPC endpoints necessary for patching instances in VPC and configure the SG traffic attached",
+                            "isCritical": true
+                        }
+                    ]
+                },
+                "DocumentType": "Automation",
+                "Name": "Enable_PVRE_Compliance_Reporting",
+            }
+        }
+    }
+}
